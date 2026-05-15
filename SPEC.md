@@ -1,6 +1,6 @@
 # CompagnonV2 — Spécification fonctionnelle complète
 
-> Version v2.4 — mai 2026  
+> Version v2.5 — mai 2026  
 > Fusion de Compagnon (PWA + firmware) et Compagnon2 (voice OS + agents mimiclaw)
 
 ---
@@ -11,7 +11,7 @@
 |-----------|----------------|--------|
 | **Arduino ESP32** | **3.3.8** | Dernière stable, basée sur IDF 5.5.4 |
 | **LVGL** | **9.x** | Version 9 supportée par Arduino ESP32 3.3.8, API moderne |
-| **Build system** | **PlatformIO** (platformio.ini) | Gestion précise des versions de librairies |
+| **Build system** | **Arduino IDE / PlatformIO** | platformio.ini ou sketch selon workflow |
 | **Arduino_GFX_Library** | dernière stable | Driver CO5300 QSPI (moononournation) |
 | **SensorLib** | dernière stable | Touch **CST9220** + RTC PCF85063 + IMU QMI8658 |
 | **XPowersLib** | **0.2.x** | Pilote officiel AXP2101 |
@@ -86,7 +86,7 @@ CompagnonV2/
     └── src/
         ├── main.cpp
         ├── config/
-        │   ├── pins.h             ← pins officielles Waveshare (3 boutons inclus)
+        │   ├── pins.h             ← TOUTES les pins vérifiées schéma rev2
         │   ├── ui_config.h        ← safe area BORDER_H=20, BORDER_V=10
         │   ├── lv_conf.h          ← LVGL 9.x
         │   └── secrets_template.h ← dev uniquement, NO clés API
@@ -95,7 +95,7 @@ CompagnonV2/
         │   ├── touch.h/.cpp       ← CST9220 I2C (SensorLib)
         │   ├── pmu.h/.cpp         ← AXP2101 (XPowersLib) + pmu_event_t
         │   ├── rtc.h/.cpp         ← PCF85063 I2C (SensorLib)
-        │   └── audio_io.h/.cpp    ← ES7210 (mic) + ES8311 (DAC) I2S
+        │   └── hal_audio.h/.cpp   ← ES7210 4-mic I2S RX + NS4150B PA_EN
         ├── net/
         ├── system/
         ├── voice/
@@ -109,42 +109,68 @@ CompagnonV2/
 
 ## 3. Hardware — Pins et boutons
 
-### 3.1 Pins (source officielle Waveshare ESP32-S3-Touch-AMOLED-2.16)
+### 3.1 Pins (vérifiées sur schéma officiel Waveshare ESP32-S3-Touch-AMOLED-2.16 rev2)
 
-| Périphérique | Pins |
-|---|---|
-| Display CO5300 QSPI | SDIO0=4, SDIO1=5, SDIO2=6, SDIO3=7, SCLK=38, RST=2, CS=12 |
-| I2C bus (partagé) | SDA=15, SCL=14 |
-| Touch **CST9220** | INT=11, sur I2C bus (SDA=15, SCL=14) |
-| IMU QMI8658 | sur I2C bus |
-| RTC PCF85063 | sur I2C bus |
-| PMU AXP2101 | sur I2C bus, IRQ = bouton PWR |
-| Audio ES7210 (mic) | BCLK=9, LRCK=45, DIN=10, MCLK=16 |
-| Audio ES8311 (DAC) | DOUT=8, BCLK/LRCK/MCLK partagés |
-| Ampli PA | GPIO46 |
-| Bouton + (KEY) | GPIO18 |
-| Bouton − (BOOT) | GPIO0 |
-| Bouton PWR | AXP2101 I2C IRQ |
+| Périphérique | Signal | GPIO | Notes |
+|---|---|---|---|
+| **Display CO5300** | LCD_CS | 12 | QSPI chip select |
+| | QSPI_SIO0 | 4 | Data 0 |
+| | QSPI_SI1 | 5 | Data 1 |
+| | QSPI_SI2 | 6 | Data 2 |
+| | QSPI_SI3 | 7 | Data 3 |
+| | QSPI_SCL | **38** | ⚠️ partagé ES7210 MCLK — init display AVANT audio |
+| | LCD_RESET | 39 | |
+| | LCD_TE | — | non connecté à un GPIO numéroté |
+| **I2C bus partagé** | SDA | 15 | Touch + IMU + RTC + PMU |
+| | SCL | 14 | Touch + IMU + RTC + PMU |
+| **Touch CST9220** | TP_INT | **11** | IRQ touch |
+| | TP_RESET | **40** | Reset actif bas |
+| | I2C addr | 0x1A | sur bus partagé |
+| **IMU QMI8658** | INT1 | **17** | wake/geste |
+| | INT2 | **21** | (optionnel) |
+| | I2C addr | 0x6B | sur bus partagé |
+| **RTC PCF85063** | — | — | sur bus partagé, addr 0x51 |
+| **PMU AXP2101** | IRQ | **9** | sur bus partagé, addr 0x34 |
+| **Audio ADC ES7210** | MCLK | **38** | ⚠️ partagé LCD_QSPI_SCL |
+| | BCLK | 36 | I2S RX |
+| | LRCK | 35 | I2S RX |
+| | DIN (ASDOUT) | **10** | SDOUT1/TDMOUT → GPIO10 via 51Ω |
+| | I2C addr | 0x40 | sur bus partagé |
+| **Speaker NS4150B** | PA_EN (CTRL) | **46** | HIGH=actif, LOW=shutdown |
+| | Entrée audio | analogique | DAC ES7210 → NS4150B PA_INL+/- directement |
+| | **Pas de I2S TX** | — | Ampli analogique, aucun I2S TX côté ESP32 |
+| **Bouton BOOT** | Key2 | **0** | pull-up 10K, actif bas, wake EXT1 |
+| **Bouton USER** | Key3 | **18** | pull-up 10K, actif bas |
+| **Power PWRON** | Key1 | AXP IRQ | géré par PMU AXP2101 |
+| **Power latch** | SYS_OUT | **16** | BSS138 transistor — HIGH pour maintenir alim |
+| **SD Card** | MOSI | 1 | SPI |
+| | SCK | 2 | SPI |
+| | MISO | 3 | SPI |
+| | CS (SDCS) | **41** | |
 
-> Display physique : 466×466 px (CO5300). Référence LVGL : 480×480 px virtuel.
-> Les coordonnées CO5300 doivent être paires — `display_rounder_cb()` s'en charge.
+> **Note GPIO38** : partagé entre `QSPI_SCL` (LCD) et `ES7210_MCLK` (audio).
+> Probablement intentionnel côté Waveshare (MCLK dérivé du clock QSPI).
+> Règle d'init : **initialiser le display AVANT l'audio**.
+
+> **Note NS4150B** : l'ampli speaker est **100% analogique**.
+> Le signal audio sort du DAC interne de l'ES7210 vers les broches PA_INL+/PA_INL-
+> puis vers l'entrée IN+/IN- du NS4150B. Il n'y a **aucun I2S TX** à configurer
+> côté ESP32. La seule action firmware = `GPIO46 HIGH` pour activer l'ampli.
 
 ### 3.2 Mapping boutons
 
-| Bouton | Appui court | Appui long |
-|--------|-------------|------------|
-| **+** GPIO18 | Tile suivante (carousel →) | Lancer l'app sélectionnée |
-| **−** GPIO0 | Tile précédente (carousel ←) | Retour / quitter l'app active |
-| **PWR** AXP IRQ | Toggle backlight (PKEY_SHORT_IRQ) | Arrêt complet `pmu_poweroff()` (PKEY_LONG_IRQ) |
-
-Aucun conflit : touch CST9220 sur INT GPIO11 (I2C), IMU/RTC sur I2C, boutons sur GPIO indépendants.
+| Bouton | GPIO | Appui court | Appui long |
+|--------|------|-------------|------------|
+| **USER** | 18 | Tile suivante (carousel →) | Lancer l'app sélectionnée |
+| **BOOT** | 0 | Tile précédente (carousel ←) | Retour / quitter l'app active |
+| **PWR** | AXP IRQ | Toggle screen (PKEY_SHORT_IRQ) | Arrêt `pmu_poweroff()` (PKEY_LONG_IRQ) |
 
 ### 3.3 pmu_event_t
 
 ```cpp
 typedef enum {
     PMU_EVT_NONE,
-    PMU_EVT_PWR_SHORT,  // → toggle backlight
+    PMU_EVT_PWR_SHORT,  // → toggle screen
     PMU_EVT_PWR_LONG,   // → pmu_poweroff()
 } pmu_event_t;
 ```
@@ -157,7 +183,7 @@ typedef enum {
 
 | Core | Tâches |
 |------|--------|
-| Core 0 | wake word (ESP-SR), audio I2S capture/playback, BLE, WiFi, timers réseau |
+| Core 0 | wake word (ESP-SR), audio I2S capture (ES7210), BLE, WiFi, timers réseau |
 | Core 1 | LVGL 9 render, touch CST9220/boutons, OS main tick, agent brain ReAct, orchestrateur apps |
 
 ### 4.2 Tâches FreeRTOS
@@ -179,7 +205,12 @@ typedef enum {
 
 ### 4.4 Light sleep
 
-Réveil : wake word (ESP-SR Core 0), timer RTC PCF85063 (rappels), bouton physique, touch CST9220.
+Sources de réveil :
+- Wake word (ESP-SR, Core 0)
+- Timer RTC PCF85063 (rappels)
+- Bouton BOOT GPIO0 (EXT1)
+- AXP2101 IRQ GPIO9 (bouton power)
+- Touch CST9220 INT GPIO11 (option)
 
 ---
 
@@ -240,11 +271,12 @@ Définis dans `config/ui_config.h`.
 
 ## 7. Voice
 
-- Wake word : **ESP-SR**, Core 0, depuis light sleep.
-- STT : **Groq Whisper** (WiFi) ou BLE relay.
-- TTS : **Groq PlayAI** → Web Speech via BLE → sons I2S ES8311.
-- Bouton micro LVGL 9 dans Nestor + Rappels.
-- Mode silencieux : flag NVS (configurable PWA).
+- Wake word : **ESP-SR**, Core 0, depuis light sleep, détection sur GPIO10 (ES7210 ASDOUT).
+- STT : **Groq Whisper** (WiFi) ou BLE relay si pas de WiFi.
+- TTS : **Groq PlayAI** → Web Speech via BLE relay → sons basiques si hors ligne.
+  - TTS audio joué via NS4150B (PA_EN=GPIO46 HIGH avant lecture).
+- Bouton micro LVGL 9 dans les apps Nestor + Rappels.
+- Mode silencieux : flag NVS `silent_mode` (configurable PWA), bypass TTS sauf alertes critiques.
 
 ---
 
@@ -252,8 +284,9 @@ Définis dans `config/ui_config.h`.
 
 - Création : formulaire PWA, texte libre, ou voix (wake word → STT → agent Rappels).
 - Modèle : `id`, `title`, `body`, `datetime`, `advance_minutes`, `repeat`, `status`.
-- Réveil : timer RTC PCF85063 → light sleep exit → son ES8311 + TTS + UI LVGL 9.
+- Réveil : timer RTC PCF85063 → light sleep exit → PA_EN HIGH + son + TTS + UI LVGL 9.
 - Sync : `REMINDERS_SYNC` BLE.
+- Acknowledge : UI affiche "Fait" / "Plus tard" (snooze).
 
 ---
 
@@ -261,9 +294,10 @@ Définis dans `config/ui_config.h`.
 
 - Base **mimiclaw** (Compagnon2).
 - Mémoire **L0-L4** : NVS → FATFS → SD.
-- **Jardinier** : cron hebdo + commande vocale.
-- **Fabrique** : création agent vocal ou PWA.
-- **Cristallisation** : skill auto si workflow ≥ N fois.
+- **Jardinier** : cron hebdo + commande vocale — nettoyage skills, compactage mémoire.
+- **Fabrique** : création agent vocal ou PWA à la volée.
+- **Cristallisation** : skill auto si workflow répété ≥ N fois.
+- **Tâches planifiées** : scheduler interne (cron simple NVS-backed).
 
 ---
 
@@ -271,9 +305,9 @@ Définis dans `config/ui_config.h`.
 
 | Niveau | Firmware | PWA |
 |--------|---------|-----|
-| Critique | NVS | localStorage |
-| Principal | FATFS flash | IndexedDB |
-| Optionnel | SD card | Cache API |
+| Critique (params, clés, flags) | NVS | localStorage |
+| Principal (agents, mémoire, rappels, sessions) | FATFS flash | IndexedDB |
+| Optionnel (archives, logs) | SD card (GPIO1/2/3/41) | Cache API |
 
 ---
 
@@ -281,6 +315,8 @@ Définis dans `config/ui_config.h`.
 
 - Responsive : 375 / 768 / 1024px.
 - Vue Compagnon : BLE, WiFi, Apps, Clés API, Agents, Rappels, Prefs.
+- Provisioning WiFi : WIFI_SCAN → WIFI_PROVISION.
+- Toutes les configs poussées via BLE (jamais hardcodées firmware).
 
 ---
 
@@ -288,16 +324,16 @@ Définis dans `config/ui_config.h`.
 
 | Phase | Étape | Statut | Notes |
 |-------|-------|--------|-------|
-| **Phase 1** | Step 1 : Squelette firmware (platformio.ini Arduino 3.3.8 + LVGL **9.x**, partitions, config, FreeRTOS skeleton) | ✅ | |
-| | Step 2 : HAL complet (display CO5300 QSPI, touch **CST9220**, PMU AXP2101 + pmu_event_t, RTC PCF85063, audio ES7210+ES8311) | ✅ | 3 boutons mappés (GPIO18/0/PWR IRQ) |
-| | Step 3 : Status bar LVGL **9** (date FR, BLE/WiFi icônes, jauge batterie colorée) | 🔜 | |
-| | Step 4 : Launcher carousel 8 apps (tileview LVGL 9, swipe CST9220, boutons GPIO) | 🔜 | |
+| **Phase 1** | Step 1 : Squelette firmware (Arduino 3.3.8 + LVGL 9.x, partitions, config, FreeRTOS skeleton) | ✅ | |
+| | Step 2 : HAL complet (display CO5300 QSPI, touch CST9220, PMU AXP2101, RTC PCF85063, audio ES7210+NS4150B) | ✅ | Pins toutes vérifiées schéma rev2 — pas d'I2S TX (ampli analogique) |
+| | Step 3 : Status bar LVGL 9 (date FR, BLE/WiFi icônes, jauge batterie colorée) | 🔜 | |
+| | Step 4 : Launcher carousel 8 apps (tileview LVGL 9, swipe CST9220, boutons GPIO18/0) | 🔜 | |
 | | Step 5 : NVS + FATFS + SD optionnel | 🔜 | |
-| | Step 6 : WiFi manager | 🔜 | |
+| | Step 6 : WiFi manager + provisioning BLE | 🔜 | |
 | **Phase 2** | Step 7 : BLE 8 caractéristiques | 🔜 | |
-| | Step 8 : 7 apps existantes sur AppBase | 🔜 | |
+| | Step 8 : 7 apps existantes portées sur AppBase | 🔜 | |
 | **Phase 3** | Step 9 : App Rappels | 🔜 | |
-| | Step 10 : Wake word + STT/TTS | 🔜 | |
-| | Step 11 : Agent brain mimiclaw | 🔜 | |
-| **Phase 4** | Step 12 : PWA responsive + Rappels | 🔜 | |
-| **Phase 5** | Step 13 : Sync + tests intégration | 🔜 | |
+| | Step 10 : Wake word + STT/TTS (ESP-SR + Groq) | 🔜 | |
+| | Step 11 : Agent brain mimiclaw + mémoire L0-L4 | 🔜 | |
+| **Phase 4** | Step 12 : PWA responsive + Rappels + sync | 🔜 | |
+| **Phase 5** | Step 13 : Tests intégration + OTA | 🔜 | |
