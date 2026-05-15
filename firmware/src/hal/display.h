@@ -1,23 +1,31 @@
 #pragma once
-// ============================================================
+// =============================================================
 // CompagnonV2 — hal/display.h
-// Pilote écran rm67162 QSPI 480×480
-// Waveshare ESP32-S3 AMOLED 2.16"
-// Arduino 3.3.8 + LVGL 8.4.x
-// ============================================================
-#include <Arduino.h>
-#include <lvgl.h>
+// Driver : CO5300 AMOLED 466×466 via QSPI (Arduino_GFX)
+// Lib    : Arduino_GFX_Library (lovyan / moononournation)
+// =============================================================
+#include <Arduino_GFX_Library.h>
 #include "../config/pins.h"
-#include "../config/ui_config.h"
 
-// Taille des buffers DMA LVGL (en pixels)
-// 1/10 de la zone logique en double-buffering PSRAM
-#define DISP_BUF_LINES   46   // APP_H / 10
-#define DISP_BUF_SIZE    (SCREEN_W * DISP_BUF_LINES)
+// Instance globale, accessible depuis les autres modules
+extern Arduino_CO5300 *gfx;
 
-bool     display_init();
-void     display_flush_cb(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* color_p);
-uint16_t display_get_brightness();
-void     display_set_brightness(uint16_t brightness);  // 0-255
-void     display_sleep();
-void     display_wake();
+/**
+ * @brief Initialise le bus QSPI et le display.
+ *        Applique le registre 0x36=0xA0 (orientation paysage interne).
+ *        Doit être appelé AVANT lv_init().
+ */
+void display_init();
+
+/**
+ * @brief Callback LVGL 8 — flush le buffer vers l'écran.
+ *        Branche sur Arduino_GFX draw16bitRGBBitmap / BeRGB selon
+ *        LV_COLOR_16_SWAP.
+ */
+void display_flush_cb(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p);
+
+/**
+ * @brief Callback LVGL 8 — force les coordonnées à être paires
+ *        (requis par le CO5300).
+ */
+void display_rounder_cb(struct _lv_disp_drv_t *disp_drv, lv_area_t *area);

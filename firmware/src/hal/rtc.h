@@ -1,18 +1,37 @@
 #pragma once
-// ============================================================
+// =============================================================
 // CompagnonV2 — hal/rtc.h
-// RTC PCF85063 I2C
-// Fallback NTP si WiFi disponible
-// ============================================================
-#include <Arduino.h>
+// Driver : PCF85063 RTC I2C (via SensorLib)
+// Rôle   : heure locale, wakeup timer pour rappels
+// =============================================================
 #include <Wire.h>
-#include <time.h>
+#include <SensorLib.h>
+#include "../config/pins.h"
 
-#define PCF85063_ADDR     0x51
-#define PCF85063_REG_CTRL 0x00
-#define PCF85063_REG_SEC  0x04   // Secondes BCD
+extern SensorPCF85063 rtc;
 
-bool  rtc_init();
-void  rtc_set_from_ntp();       // Sync RTC depuis NTP (appeler quand WiFi connecté)
-time_t rtc_get_time();          // Timestamp UNIX
-void  rtc_get_local_fr(char* buf, size_t buf_len);  // "15 mai 2026 - 16:05"
+/**
+ * @brief Initialise le PCF85063.
+ * @return true si RTC répond.
+ */
+bool rtc_init();
+
+/**
+ * @brief Synchronise la RTC depuis NTP (appeler après WiFi connect).
+ * @param epoch  timestamp Unix UTC.
+ */
+void rtc_sync_from_ntp(time_t epoch);
+
+/**
+ * @brief Retourne l'heure locale comme struct tm (TZ Europe/Paris).
+ */
+struct tm rtc_get_local_time();
+
+/**
+ * @brief Programme une alarme one-shot pour le réveil light-sleep.
+ * @param epoch  timestamp Unix UTC du réveil souhaité.
+ */
+void rtc_set_alarm(time_t epoch);
+
+/** @brief Annule l'alarme en cours. */
+void rtc_clear_alarm();

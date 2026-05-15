@@ -1,32 +1,46 @@
 #pragma once
-// ============================================================
+// =============================================================
 // CompagnonV2 — hal/audio_io.h
-// Audio I2S + codec ES8311
-// Mic I2S (entrée ASR), SPK I2S via ES8311 + ampli PA
-// Waveshare ESP32-S3 AMOLED 2.16"
-// ============================================================
-#include <Arduino.h>
+// Codec entrée : ES7210 (4-mic array, I2S)
+// Codec sortie : ES8311 (DAC mono/stéréo, I2S partagé)
+// Ampli        : PA enable GPIO 46
+// =============================================================
 #include <Wire.h>
+#include <driver/i2s.h>
 #include "../config/pins.h"
 
-#define ES8311_ADDR   0x18
-#define AUDIO_SAMPLE_RATE   16000   // Hz — Whisper ASR
-#define AUDIO_BITS          16
-#define AUDIO_CHANNELS_MIC  1
-#define AUDIO_CHANNELS_SPK  1
+// Port I2S utilisé
+#define AUDIO_I2S_PORT       I2S_NUM_1
+#define AUDIO_SAMPLE_RATE    16000
+#define AUDIO_BITS           I2S_BITS_PER_SAMPLE_16BIT
+#define AUDIO_DMA_BUF_COUNT  8
+#define AUDIO_DMA_BUF_LEN    512
 
+/**
+ * @brief Initialise le bus I2S, configure ES7210 (entrée) et ES8311 (sortie)
+ *        via I2C. Active l'ampli PA.
+ * @return true si les deux codecs répondent sur I2C.
+ */
 bool audio_init();
 
-// MIC — capture PCM 16kHz mono pour wake word / ASR
-bool audio_mic_start();
-void audio_mic_stop();
-int  audio_mic_read(int16_t* buf, size_t samples);  // retourne nb samples lus
+/**
+ * @brief Lit des échantillons PCM 16 bits depuis le micro ES7210.
+ * @param buf       Buffer de destination.
+ * @param buf_bytes Taille en octets du buffer.
+ * @param[out] bytes_read Octets effectivement lus.
+ */
+void audio_read(int16_t *buf, size_t buf_bytes, size_t *bytes_read);
 
-// SPK — lecture PCM 16kHz mono pour TTS
-bool audio_spk_start();
-void audio_spk_stop();
-bool audio_spk_play(const int16_t* buf, size_t samples);
-void audio_spk_set_volume(uint8_t vol);  // 0-100
+/**
+ * @brief Envoie des échantillons PCM 16 bits vers le DAC ES8311.
+ * @param buf        Buffer source.
+ * @param buf_bytes  Taille en octets.
+ * @param[out] bytes_written Octets écrits.
+ */
+void audio_write(const int16_t *buf, size_t buf_bytes, size_t *bytes_written);
 
-// Sons système
-void audio_play_beep(uint16_t freq_hz, uint16_t duration_ms);
+/** @brief Active ou désactive l'amplificateur PA. */
+void audio_set_pa(bool enable);
+
+/** @brief Règle le volume de sortie ES8311 (0–100). */
+void audio_set_volume(uint8_t vol_pct);

@@ -1,81 +1,65 @@
-// ============================================================
+// =============================================================
 // CompagnonV2 — hal/pmu.cpp
-// AXP2101 via XPowersLib 0.2.x
-// ============================================================
+// =============================================================
 #include "pmu.h"
 
-static XPowersPMU s_pmu;
-static BatteryInfo s_batt_info = {0, 0.0f, false, false};
-static portMUX_TYPE s_batt_mux = portMUX_INITIALIZER_UNLOCKED;
+XPowersPMU pmu;
+volatile bool pmu_irq_flag = false;
 
-// ── IRQ PMU ────────────────────────────────────────────────────────────────
-static volatile bool s_pmu_irq = false;
-
-static void IRAM_ATTR _pmu_irq_handler() {
-    s_pmu_irq = true;
+static void IRAM_ATTR _pmu_isr() {
+    pmu_irq_flag = true;
 }
 
-// ── Init ───────────────────────────────────────────────────────────────────
 bool pmu_init() {
-    if (!s_pmu.begin(Wire, AXP2101_SLAVE_ADDRESS, IIC_SDA, IIC_SCL)) {
-        Serial.println("[PMU] ERREUR: AXP2101 non détecté");
+    if (!pmu.begin(Wire, AXP2101_SLAVE_ADDRESS, PIN_IIC_SDA, PIN_IIC_SCL)) {
+        Serial.println("[HAL] PMU AXP2101 NOT found!");
         return false;
     }
 
-    // Tension DCDC et LDO pour l'écran AMOLED et les périphériques
-    s_pmu.setPowerChannelVoltage(XPOWERS_DCDC1, 3300);  // VDD3.3
-    s_pmu.enablePowerOutput(XPOWERS_DCDC1);
-    s_pmu.setPowerChannelVoltage(XPOWERS_ALDO2, 1800);  // VDDIO 1.8V
-    s_pmu.enablePowerOutput(XPOWERS_ALDO2);
-    s_pmu.setPowerChannelVoltage(XPOWERS_ALDO3, 3300);  // LCD power
-    s_pmu.enablePowerOutput(XPOWERS_ALDO3);
+    // Désactive toutes les IRQ, repart proprement
+    pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+    pmu.clearIrqStatus();
 
-    // Courant de charge 500 mA
-    s_pmu.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_500MA);
+    // Tension de charge cible : 4.2V (index 3 dans XPowersLib)
+    pmu.setChargeTargetVoltage(3);
 
-    // IRQ sur broche AXP_INT
-    s_pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
-    s_pmu.enableIRQ(XPOWERS_AXP2101_BAT_INSERT_IRQ |
-                    XPOWERS_AXP2101_BAT_REMOVE_IRQ |
-                    XPOWERS_AXP2101_VBUS_INSERT_IRQ |
-                    XPOWERS_AXP2101_VBUS_REMOVE_IRQ);
-    s_pmu.clearIRQ();
+    // ADC
+    pmu.enableBattDetection();
+    pmu.enableBattVoltageMeasure();
+    pmu.enableVbusVoltageMeasure();
+    pmu.enableSystemVoltageMeasure();
+    pmu.enableTemperatureMeasure();
 
-    pinMode(AXP_INT, INPUT);
-    attachInterrupt(digitalPinToInterrupt(AXP_INT), _pmu_irq_handler, FALLING);
+    // IRQ bouton POWER (court)
+    pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ);
 
-    Serial.println("[PMU] AXP2101 init OK");
+    // Attache ISR sur pin PMU INT (sur cette carte, l'INT AXP est connecté
+    // à la même ligne I2C — pas de pin INT dédiée visible dans pin_config.h
+    // Waveshare. On utilise donc le polling dans pmu_handle_irq() si pas
+    // de pin INT disponible. Décommenter si vous câblez une pin INT externe.)
+    // attachInterrupt(PIN_PMU_INT, _pmu_isr, FALLING);
+
+    Serial.println("[HAL] PMU AXP2101 init OK");
     return true;
 }
 
-// ── Tick ~1s ───────────────────────────────────────────────────────────────
-void pmu_tick() {
-    if (s_pmu_irq) {
-        s_pmu.clearIRQ();
-        s_pmu_irq = false;
+void pmu_handle_irq() {
+    // Polling fallback (ou appel depuis ISR si pin INT câblée)
+    if (pmu_irq_flag) {
+        pmu_irq_flag = false;
+        pmu.clearIrqStatus();
     }
-
-    BatteryInfo b;
-    b.percent     = (uint8_t)s_pmu.getBatteryPercent();
-    b.voltage     = s_pmu.getBattVoltage();
-    b.charging    = s_pmu.isCharging();
-    b.usb_present = s_pmu.isVbusIn();
-
-    portENTER_CRITICAL(&s_batt_mux);
-    s_batt_info = b;
-    portEXIT_CRITICAL(&s_batt_mux);
 }
 
-// ── Getter thread-safe ─────────────────────────────────────────────────────
-BatteryInfo pmu_get_battery() {
-    BatteryInfo b;
-    portENTER_CRITICAL(&s_batt_mux);
-    b = s_batt_info;
-    portEXIT_CRITICAL(&s_batt_mux);
-    return b;
+int pmu_battery_percent() {
+    if (!pmu.isBatteryConnect()) return -1;
+    return (int)pmu.getBatteryPercent();
 }
 
-void pmu_set_charging_led(bool on) {
-    // LED de charge via CHG_LED AXP2101
-    on ? s_pmu.enableChargingLed() : s_pmu.disableChargingLed();
+bool pmu_is_charging() {
+    return pmu.isCharging();
+}
+
+uint16_t pmu_battery_voltage_mv() {
+    return (uint16_t)pmu.getBattVoltage();
 }

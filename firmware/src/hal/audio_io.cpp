@@ -1,205 +1,115 @@
-// ============================================================
+// =============================================================
 // CompagnonV2 — hal/audio_io.cpp
-// ES8311 codec I2C + I2S
-// Basé sur le driver Compagnon2 (xiaozhi heritage)
-// ============================================================
+// Note : La configuration I2C des codecs ES7210/ES8311 utilise
+//        les adresses I2C définies dans pins.h.
+//        On n'inclut pas de lib tierce ES7210/ES8311 ici — on
+//        passe par les registres I2C directement (compatible
+//        Arduino Wire) inspiré des exemples Waveshare 06/07.
+// =============================================================
 #include "audio_io.h"
-#include <driver/i2s.h>
+#include <Arduino.h>
 
-// ── Ports I2S ─────────────────────────────────────────────────────────────
-#define I2S_PORT_MIC   I2S_NUM_1
-#define I2S_PORT_SPK   I2S_NUM_0
-
-// ── Registres ES8311 (I2C) ────────────────────────────────────────────────
-static void _es8311_write(uint8_t reg, uint8_t val) {
-    Wire.beginTransmission(ES8311_ADDR);
+// ── Helpers I2C register write ────────────────────────────────
+static void _i2c_write_reg(uint8_t addr, uint8_t reg, uint8_t val) {
+    Wire.beginTransmission(addr);
     Wire.write(reg);
     Wire.write(val);
     Wire.endTransmission();
 }
 
-static uint8_t _es8311_read(uint8_t reg) {
-    Wire.beginTransmission(ES8311_ADDR);
-    Wire.write(reg);
-    Wire.endTransmission(false);
-    Wire.requestFrom(ES8311_ADDR, (uint8_t)1);
-    return Wire.available() ? Wire.read() : 0xFF;
-}
-
-// Séquence init ES8311 pour 16kHz 16bit
-static bool _es8311_init() {
-    // Vérif présence
-    Wire.beginTransmission(ES8311_ADDR);
-    if (Wire.endTransmission() != 0) {
-        Serial.println("[AUDIO] ERREUR: ES8311 non détecté sur I2C");
-        return false;
-    }
+// ── ES7210 init (micro input) ─────────────────────────────────
+static bool _es7210_init() {
     // Reset
-    _es8311_write(0x00, 0x1F);
+    _i2c_write_reg(I2C_ADDR_ES7210, 0x00, 0xFF);
     delay(10);
-    _es8311_write(0x00, 0x00);
-    delay(10);
-
-    // Horloge : MCLK externe 16MHz, LRCK = 16kHz, BCLK = 512kHz
-    _es8311_write(0x01, 0x30);  // MCLK source = externe
-    _es8311_write(0x02, 0x10);  // PRE-DIV
-    _es8311_write(0x03, 0x10);  // DIV
-    _es8311_write(0x04, 0x10);
-    _es8311_write(0x05, 0x00);
-    _es8311_write(0x06, 0x03);  // LRCK div
-    _es8311_write(0x07, 0xFF);
-    _es8311_write(0x08, 0xFF);
-
-    // Format I2S 16bit
-    _es8311_write(0x09, 0x00);
-    _es8311_write(0x0A, 0x00);
-    _es8311_write(0x10, 0x1F);  // ADC volume
-    _es8311_write(0x11, 0x7F);  // ADC PGA gain
-    _es8311_write(0x12, 0x00);
-    _es8311_write(0x13, 0x10);
-    _es8311_write(0x14, 0x00);
-    _es8311_write(0x15, 0x00);
-    _es8311_write(0x16, 0x24);  // DAC volume
-    _es8311_write(0x17, 0x00);
-
-    // Power up ADC + DAC
-    _es8311_write(0x0D, 0x01);
-    _es8311_write(0x0E, 0x02);
-    _es8311_write(0x0F, 0xFF);
-
-    // Activation sortie HP
-    _es8311_write(0x1C, 0x6A);
-    _es8311_write(0x1D, 0x60);
-    _es8311_write(0x1E, 0x00);
-    _es8311_write(0x37, 0x08);  // DAC output
-
-    Serial.println("[AUDIO] ES8311 init OK");
+    _i2c_write_reg(I2C_ADDR_ES7210, 0x00, 0x41);
+    // Mode I2S, 16 bits, MCLK/256
+    _i2c_write_reg(I2C_ADDR_ES7210, 0x01, 0x14);
+    // Enable MIC1 + MIC2 channels
+    _i2c_write_reg(I2C_ADDR_ES7210, 0x07, 0x20);
+    _i2c_write_reg(I2C_ADDR_ES7210, 0x08, 0x11);
+    // Gain MIC1/MIC2 : 30 dB
+    _i2c_write_reg(I2C_ADDR_ES7210, 0x43, 0x1E);
+    _i2c_write_reg(I2C_ADDR_ES7210, 0x44, 0x1E);
+    Serial.println("[HAL] ES7210 (mic) init OK");
     return true;
 }
 
-// ── Init I2S MIC ──────────────────────────────────────────────────────────
-static bool _i2s_mic_init() {
-    i2s_config_t cfg = {
-        .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-        .sample_rate          = AUDIO_SAMPLE_RATE,
-        .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
-        .channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT,
-        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-        .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count        = 4,
-        .dma_buf_len          = 512,
-        .use_apll             = false,
-        .tx_desc_auto_clear   = false,
-        .fixed_mclk           = 0
-    };
-    i2s_pin_config_t pins = {
-        .mck_io_num   = MIC_MCLK,
-        .bck_io_num   = MIC_BCLK,
-        .ws_io_num    = MIC_LRCK,
-        .data_out_num = I2S_PIN_NO_CHANGE,
-        .data_in_num  = MIC_DIN
-    };
-    esp_err_t r = i2s_driver_install(I2S_PORT_MIC, &cfg, 0, nullptr);
-    if (r != ESP_OK) { Serial.printf("[AUDIO] I2S MIC install err: %d\n", r); return false; }
-    i2s_set_pin(I2S_PORT_MIC, &pins);
+// ── ES8311 init (DAC output) ──────────────────────────────────
+static bool _es8311_init() {
+    // Reset
+    _i2c_write_reg(I2C_ADDR_ES8311, 0x00, 0x1F);
+    delay(10);
+    _i2c_write_reg(I2C_ADDR_ES8311, 0x00, 0x00);
+    // Clock : MCLK=16MHz/256, SCLK divider
+    _i2c_write_reg(I2C_ADDR_ES8311, 0x01, 0x30);
+    _i2c_write_reg(I2C_ADDR_ES8311, 0x02, 0x10);
+    _i2c_write_reg(I2C_ADDR_ES8311, 0x03, 0x10);
+    // Format I2S 16 bits
+    _i2c_write_reg(I2C_ADDR_ES8311, 0x0C, 0x0C);
+    // Volume DAC : 0 dBFS
+    _i2c_write_reg(I2C_ADDR_ES8311, 0x32, 0xBF);
+    // Power up
+    _i2c_write_reg(I2C_ADDR_ES8311, 0x0D, 0x01);
+    Serial.println("[HAL] ES8311 (dac) init OK");
     return true;
 }
 
-// ── Init I2S SPK ──────────────────────────────────────────────────────────
-static bool _i2s_spk_init() {
+// ── I2S peripheral init ───────────────────────────────────────
+static void _i2s_init() {
     i2s_config_t cfg = {
-        .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
+        .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_RX),
         .sample_rate          = AUDIO_SAMPLE_RATE,
-        .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
-        .channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT,
+        .bits_per_sample      = AUDIO_BITS,
+        .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count        = 4,
-        .dma_buf_len          = 512,
-        .use_apll             = false,
+        .dma_buf_count        = AUDIO_DMA_BUF_COUNT,
+        .dma_buf_len          = AUDIO_DMA_BUF_LEN,
+        .use_apll             = true,
         .tx_desc_auto_clear   = true,
-        .fixed_mclk           = 0
+        .fixed_mclk           = 0,
     };
     i2s_pin_config_t pins = {
-        .mck_io_num   = I2S_PIN_NO_CHANGE,
-        .bck_io_num   = I2S_PIN_NO_CHANGE,
-        .ws_io_num    = I2S_PIN_NO_CHANGE,
-        .data_out_num = ES8311_DOUT,
-        .data_in_num  = I2S_PIN_NO_CHANGE
+        .mck_io_num   = PIN_ES7210_MCLK,
+        .bck_io_num   = PIN_ES7210_BCLK,
+        .ws_io_num    = PIN_ES7210_LRCK,
+        .data_out_num = PIN_ES8311_DOUT,
+        .data_in_num  = PIN_ES7210_DIN,
     };
-    esp_err_t r = i2s_driver_install(I2S_PORT_SPK, &cfg, 0, nullptr);
-    if (r != ESP_OK) { Serial.printf("[AUDIO] I2S SPK install err: %d\n", r); return false; }
-    i2s_set_pin(I2S_PORT_SPK, &pins);
-    // Ampli PA
-    pinMode(PA_EN, OUTPUT);
-    digitalWrite(PA_EN, LOW);  // PA éteint par défaut
-    return true;
+    i2s_driver_install(AUDIO_I2S_PORT, &cfg, 0, NULL);
+    i2s_set_pin(AUDIO_I2S_PORT, &pins);
+    i2s_set_clk(AUDIO_I2S_PORT, AUDIO_SAMPLE_RATE, AUDIO_BITS, I2S_CHANNEL_STEREO);
 }
 
-// ── API publique ───────────────────────────────────────────────────────────
 bool audio_init() {
-    if (!_es8311_init()) return false;
-    if (!_i2s_mic_init()) return false;
-    if (!_i2s_spk_init()) return false;
-    return true;
+    pinMode(PIN_PA, OUTPUT);
+    digitalWrite(PIN_PA, LOW); // ampli off pendant init
+
+    bool ok = true;
+    ok &= _es7210_init();
+    ok &= _es8311_init();
+    _i2s_init();
+
+    digitalWrite(PIN_PA, HIGH); // ampli on
+    Serial.println("[HAL] Audio init OK");
+    return ok;
 }
 
-bool audio_mic_start() {
-    i2s_start(I2S_PORT_MIC);
-    return true;
+void audio_read(int16_t *buf, size_t buf_bytes, size_t *bytes_read) {
+    i2s_read(AUDIO_I2S_PORT, buf, buf_bytes, bytes_read, portMAX_DELAY);
 }
 
-void audio_mic_stop() {
-    i2s_stop(I2S_PORT_MIC);
+void audio_write(const int16_t *buf, size_t buf_bytes, size_t *bytes_written) {
+    i2s_write(AUDIO_I2S_PORT, buf, buf_bytes, bytes_written, portMAX_DELAY);
 }
 
-int audio_mic_read(int16_t* buf, size_t samples) {
-    size_t bytes_read = 0;
-    esp_err_t r = i2s_read(I2S_PORT_MIC, buf, samples * sizeof(int16_t), &bytes_read, portMAX_DELAY);
-    if (r != ESP_OK) return 0;
-    return (int)(bytes_read / sizeof(int16_t));
+void audio_set_pa(bool enable) {
+    digitalWrite(PIN_PA, enable ? HIGH : LOW);
 }
 
-bool audio_spk_start() {
-    digitalWrite(PA_EN, HIGH);  // Ampli ON
-    i2s_start(I2S_PORT_SPK);
-    return true;
-}
-
-void audio_spk_stop() {
-    i2s_stop(I2S_PORT_SPK);
-    delay(10);
-    digitalWrite(PA_EN, LOW);   // Ampli OFF
-}
-
-bool audio_spk_play(const int16_t* buf, size_t samples) {
-    size_t bytes_written = 0;
-    esp_err_t r = i2s_write(I2S_PORT_SPK, buf, samples * sizeof(int16_t), &bytes_written, portMAX_DELAY);
-    return (r == ESP_OK);
-}
-
-void audio_spk_set_volume(uint8_t vol) {
-    // Volume via registre DAC ES8311 (0-255 mappe sur 0-100%)
-    uint8_t reg_val = (uint8_t)((uint32_t)vol * 255 / 100);
-    _es8311_write(0x32, reg_val);
-}
-
-void audio_play_beep(uint16_t freq_hz, uint16_t duration_ms) {
-    // Génère un beep sinusoïdal simple
-    audio_spk_start();
-    const uint32_t sample_rate = AUDIO_SAMPLE_RATE;
-    const uint32_t total_samples = (uint32_t)sample_rate * duration_ms / 1000;
-    const float    omega = 2.0f * M_PI * freq_hz / sample_rate;
-    const uint16_t CHUNK = 256;
-    int16_t buf[CHUNK];
-    uint32_t written = 0;
-    while (written < total_samples) {
-        uint16_t n = min((uint32_t)CHUNK, total_samples - written);
-        for (uint16_t i = 0; i < n; i++) {
-            buf[i] = (int16_t)(8000.0f * sinf(omega * (written + i)));
-        }
-        audio_spk_play(buf, n);
-        written += n;
-    }
-    audio_spk_stop();
+void audio_set_volume(uint8_t vol_pct) {
+    // vol_pct 0-100 → registre ES8311 0x32 : 0xFF=+0dB, 0x00=mute
+    uint8_t reg_val = (uint8_t)((vol_pct * 0xBF) / 100);
+    _i2c_write_reg(I2C_ADDR_ES8311, 0x32, reg_val);
 }

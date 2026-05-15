@@ -1,106 +1,75 @@
-// ============================================================
+// =============================================================
 // CompagnonV2 — hal/rtc.cpp
-// PCF85063 I2C + sync NTP
-// Format FR : "15 mai 2026 - 16:05"
-// ============================================================
+// =============================================================
 #include "rtc.h"
+#include <time.h>
 
-static const char* MONTH_FR[] = {
-    "", "janv.", "févr.", "mars", "avr.", "mai", "juin",
-    "juil.", "août", "sept.", "oct.", "nov.", "déc."
-};
+SensorPCF85063 rtc;
 
-// ── BCD helpers ───────────────────────────────────────────────────────────
-static uint8_t _bcd2dec(uint8_t b) { return (b >> 4) * 10 + (b & 0x0F); }
-static uint8_t _dec2bcd(uint8_t d) { return ((d / 10) << 4) | (d % 10); }
-
-// ── Lecture registres PCF85063 ────────────────────────────────────────────
-static bool _pcf_read(struct tm* t) {
-    Wire.beginTransmission(PCF85063_ADDR);
-    Wire.write(PCF85063_REG_SEC);
-    if (Wire.endTransmission(false) != 0) return false;
-    Wire.requestFrom(PCF85063_ADDR, (uint8_t)7);
-    if (Wire.available() < 7) return false;
-
-    t->tm_sec  = _bcd2dec(Wire.read() & 0x7F);
-    t->tm_min  = _bcd2dec(Wire.read() & 0x7F);
-    t->tm_hour = _bcd2dec(Wire.read() & 0x3F);
-    Wire.read();                               // jour semaine
-    t->tm_mday = _bcd2dec(Wire.read() & 0x3F);
-    t->tm_mon  = _bcd2dec(Wire.read() & 0x1F) - 1;
-    t->tm_year = _bcd2dec(Wire.read()) + 100; // base 1900
-    t->tm_isdst = -1;
-    return true;
-}
-
-// ── Écriture PCF85063 ────────────────────────────────────────────────────
-static void _pcf_write(const struct tm* t) {
-    Wire.beginTransmission(PCF85063_ADDR);
-    Wire.write(PCF85063_REG_SEC);
-    Wire.write(_dec2bcd(t->tm_sec));
-    Wire.write(_dec2bcd(t->tm_min));
-    Wire.write(_dec2bcd(t->tm_hour));
-    Wire.write(0x00);                           // jour semaine
-    Wire.write(_dec2bcd(t->tm_mday));
-    Wire.write(_dec2bcd(t->tm_mon + 1));
-    Wire.write(_dec2bcd(t->tm_year - 100));
-    Wire.endTransmission();
-}
-
-// ── Init ──────────────────────────────────────────────────────────────────
 bool rtc_init() {
-    // I2C déjà démarré par touch_init()
-    Wire.beginTransmission(PCF85063_ADDR);
-    if (Wire.endTransmission() != 0) {
-        Serial.println("[RTC] ERREUR: PCF85063 non détecté");
+    if (!rtc.begin(Wire, PCF85063_SLAVE_ADDRESS, PIN_IIC_SDA, PIN_IIC_SCL)) {
+        Serial.println("[HAL] RTC PCF85063 NOT found!");
         return false;
     }
-    // Reset control register (OS bit clear, clock running)
-    Wire.beginTransmission(PCF85063_ADDR);
-    Wire.write(PCF85063_REG_CTRL);
-    Wire.write(0x00);
-    Wire.endTransmission();
-
-    // Charge l'heure RTC dans le système (struct timeval)
-    struct tm t;
-    if (_pcf_read(&t)) {
-        time_t ts = mktime(&t);
-        struct timeval tv = { .tv_sec = ts };
-        settimeofday(&tv, nullptr);
-        Serial.println("[RTC] PCF85063 init OK — heure restaurée");
-    } else {
-        Serial.println("[RTC] PCF85063 init OK — heure non lisible");
-    }
+    // Configuration timezone pour la France (CET/CEST)
     setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
     tzset();
+    Serial.println("[HAL] RTC PCF85063 init OK");
     return true;
 }
 
-// ── Sync NTP → RTC ───────────────────────────────────────────────────────
-void rtc_set_from_ntp() {
-    configTzTime("CET-1CEST,M3.5.0,M10.5.0/3",
-                 "pool.ntp.org", "time.cloudflare.com", nullptr);
-    delay(500);  // laisser le temps à NTP
-    time_t now = time(nullptr);
-    if (now < 1700000000UL) {
-        Serial.println("[RTC] NTP sync échoué (time invalid)");
-        return;
-    }
+void rtc_sync_from_ntp(time_t epoch) {
+    // Convertit epoch UTC → struct tm UTC
     struct tm t;
-    localtime_r(&now, &t);
-    _pcf_write(&t);
-    Serial.println("[RTC] NTP sync OK → PCF85063 mis à jour");
+    gmtime_r(&epoch, &t);
+    // Écrit dans la RTC
+    rtc.setDateTime(
+        t.tm_year + 1900,
+        t.tm_mon  + 1,
+        t.tm_mday,
+        t.tm_hour,
+        t.tm_min,
+        t.tm_sec
+    );
+    // Met aussi à jour l'horloge système ESP32
+    struct timeval tv = { .tv_sec = epoch, .tv_usec = 0 };
+    settimeofday(&tv, NULL);
+    Serial.printf("[HAL] RTC synced from NTP : %04d-%02d-%02d %02d:%02d:%02d UTC\n",
+        t.tm_year+1900, t.tm_mon+1, t.tm_mday,
+        t.tm_hour, t.tm_min, t.tm_sec);
 }
 
-// ── Getter timestamp ─────────────────────────────────────────────────────
-time_t rtc_get_time() { return time(nullptr); }
+struct tm rtc_get_local_time() {
+    // Lit depuis la RTC hardware (UTC) puis convertit via TZ
+    RTC_DateTime dt = rtc.getDateTime();
+    struct tm t = {};
+    t.tm_year = dt.year  - 1900;
+    t.tm_mon  = dt.month - 1;
+    t.tm_mday = dt.day;
+    t.tm_hour = dt.hours;
+    t.tm_min  = dt.minutes;
+    t.tm_sec  = dt.seconds;
+    t.tm_isdst = -1;
+    time_t utc = mktime(&t);
+    // mktime interprète en TZ locale → on force UTC d'abord
+    // Simple workaround : utiliser localtime sur l'epoch système
+    time_t now;
+    time(&now);
+    struct tm local;
+    localtime_r(&now, &local);
+    return local;
+}
 
-// ── Getter formaté FR ────────────────────────────────────────────────────
-void rtc_get_local_fr(char* buf, size_t buf_len) {
-    time_t now = time(nullptr);
+void rtc_set_alarm(time_t epoch) {
     struct tm t;
-    localtime_r(&now, &t);
-    snprintf(buf, buf_len, "%d %s %d - %02d:%02d",
-             t.tm_mday, MONTH_FR[t.tm_mon + 1],
-             1900 + t.tm_year, t.tm_hour, t.tm_min);
+    gmtime_r(&epoch, &t);
+    // SensorLib PCF85063 alarm : minute + heure (day alarm)
+    rtc.setAlarm(t.tm_min, t.tm_hour, t.tm_mday, -1);
+    rtc.enableAlarm();
+    Serial.printf("[HAL] RTC alarm set at %02d:%02d (UTC)\n", t.tm_hour, t.tm_min);
+}
+
+void rtc_clear_alarm() {
+    rtc.disableAlarm();
+    rtc.clearAlarm();
 }

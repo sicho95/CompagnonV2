@@ -1,23 +1,34 @@
 #pragma once
-// ============================================================
+// =============================================================
 // CompagnonV2 — hal/pmu.h
-// Gestion PMU AXP2101 via XPowersLib
-// Waveshare ESP32-S3 AMOLED 2.16"
-// ============================================================
-#include <Arduino.h>
+// Driver : AXP2101 via XPowersLib
+// =============================================================
 #include <Wire.h>
 #include <XPowersLib.h>
 #include "../config/pins.h"
 
-// Données batterie partagées avec le reste de l'OS
-struct BatteryInfo {
-    uint8_t  percent;    // 0-100 %
-    float    voltage;    // mV
-    bool     charging;
-    bool     usb_present;
-};
+extern XPowersPMU pmu;
 
-bool        pmu_init();
-void        pmu_tick();          // à appeler dans task_os_main ~1s
-BatteryInfo pmu_get_battery();   // thread-safe (copie)
-void        pmu_set_charging_led(bool on);
+/**
+ * @brief Initialise l'AXP2101.
+ *        Active les ADC batterie/VBUS/système.
+ *        Configure la cible de charge à 4.2V.
+ *        Active l'IRQ PKEY_SHORT pour le bouton power.
+ * @return true si PMU répond, false sinon.
+ */
+bool pmu_init();
+
+/** @brief Traitement des IRQ PMU (à appeler depuis la tâche OS). */
+void pmu_handle_irq();
+
+/** @brief Retourne le pourcentage batterie (0–100), -1 si pas de batterie. */
+int  pmu_battery_percent();
+
+/** @brief Retourne true si en charge. */
+bool pmu_is_charging();
+
+/** @brief Retourne la tension batterie en mV. */
+uint16_t pmu_battery_voltage_mv();
+
+/** @brief Flag IRQ levé depuis l'ISR → lu et réinitialisé par pmu_handle_irq(). */
+extern volatile bool pmu_irq_flag;
