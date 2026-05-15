@@ -23,9 +23,9 @@
 // ─── Audio ADC ES7210 (I2S RX TDM 4-mic) ────────────────────
 // Confirmé sur schéma ES7210 (U7) :
 //   MCLK  → R38 → GPIO38  (I2S_MCLK)
-//   SCLK  → GPIO36         (I2S_SCLK)
-//   LRCK  → GPIO35         (I2S_LRCK)
-//   SDOUT1/TDMOUT → R38 51Ω → GPIO10  (I2S_ASDOUT)
+//   SCLK  → GPIO36        (I2S_SCLK)
+//   LRCK  → GPIO35        (I2S_LRCK)
+//   SDOUT1/TDMOUT → 51Ω → GPIO10  (I2S_ASDOUT)
 // ES7210 I2C addr 0x40 → bus partagé SDA=15, SCL=14
 #define PIN_ES7210_MCLK  38
 #define PIN_ES7210_BCLK  36
@@ -39,9 +39,11 @@
 //   HIGH = ampli actif, LOW = shutdown (économie énergie)
 #define PIN_SPK_PA_EN  46   // NS4150B CTRL via R16 0R
 
-// ─── IMU QMI8658 (I2C) ───────────────────────────────────────
-#define PIN_IMU_INT1   40
-#define PIN_IMU_INT2   41   // NOTE: vérifier conflit SD_CS si SD activé
+// ─── IMU QMI8658 (I2C + INT) ─────────────────────────────────
+// Confirmé schéma : INT1=GPIO17, INT2=GPIO21
+// I2C partagé SDA=15, SCL=14
+#define PIN_IMU_INT1   17
+#define PIN_IMU_INT2   21
 
 // ─── RTC PCF85063 (I2C) ──────────────────────────────────────
 // Partagé sur le bus I2C (SDA=15, SCL=14)
@@ -52,6 +54,8 @@
 
 // ─── Buttons ─────────────────────────────────────────────────
 #define PIN_BTN_BOOT    0   // BOOT button (GPIO0), wake EXT1
+// ⚠️ PIN_BTN_RIGHT : GPIO21 partagé avec IMU INT2 — à confirmer sur schéma
+// Si IMU INT2 non utilisé en IRQ, GPIO21 peut servir de bouton
 #define PIN_BTN_RIGHT  21
 
 // ─── SD Card (SPI) ───────────────────────────────────────────
@@ -59,8 +63,7 @@
 //   MOSI → GPIO1
 //   SCK  → GPIO2
 //   MISO → GPIO3
-//   SDCS → GPIO41
-// ⚠️ GPIO41 partagé avec PIN_IMU_INT2 — désactiver l'un si les deux actifs
+//   SDCS → GPIO41  (pas de conflit, IMU INT2 = GPIO21)
 #define PIN_SD_MOSI     1
 #define PIN_SD_SCK      2
 #define PIN_SD_MISO     3
@@ -69,4 +72,4 @@
 // ─── Wake sources (light sleep) ──────────────────────────────
 #define WAKE_GPIO_BTN   PIN_BTN_BOOT  // GPIO0, EXT1 wake
 #define WAKE_AXP_IRQ    PIN_AXP_IRQ   // AXP2101 IRQ (charger / power key)
-// Wake audio : surveiller GPIO10 (ES7210 ASDOUT) en niveau si nécessaire
+// Wake audio : GPIO10 (ES7210 ASDOUT) en niveau si nécessaire
