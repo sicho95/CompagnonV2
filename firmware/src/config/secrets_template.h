@@ -1,33 +1,27 @@
 #pragma once
-// ============================================================
-// CompagnonV2 — device_config_template.h
-// Config embarquée MINIMALE — ne contient PAS les clés API.
-//
-// Les clés API (Groq, OpenWeatherMap, AlphaVantage, etc.) sont
-// saisies dans la PWA Compagnon et poussées de manière sécurisée
-// vers l'ESP32 via BLE (caractéristique DEVICE_CONFIG).
-// Elles sont ensuite stockées chiffrées en NVS.
-//
-// Ce fichier contient uniquement :
-//   - le nom BLE du device (non secret)
-//   - le wake word (non secret)
-//   - un SSID/mdp WiFi de DEV (optionnel, uniquement pour le flash initial)
-//     → à laisser vide en production, utiliser le provisioning PWA
-// ============================================================
+/*
+ * secrets_template.h — Template de développement UNIQUEMENT
+ *
+ * CE FICHIER EST POUR LE DEV LOCAL UNIQUEMENT.
+ * En production, toutes les valeurs ci-dessous sont
+ * configurées depuis la PWA CompagnonV2 via BLE → NVS.
+ *
+ * Usage :
+ *   1. Copier ce fichier vers secrets.h
+ *   2. Remplir les valeurs pour vos tests
+ *   3. Ne jamais commiter secrets.h (ajouté au .gitignore)
+ *
+ * Paramètres configurables depuis la PWA :
+ *   - BLE_DEVICE_NAME  → NVS key "ble_name"
+ *   - WAKE_WORD        → NVS key "wake_word"
+ *   - WiFi SSID/PWD    → NVS via commande BLE wifi_provision
+ *   - Toutes les API keys → NVS via commande BLE set_api_key
+ */
 
-// ─── BLE device name (visible lors du scan BLE depuis la PWA) ────────────────
-#define BLE_DEVICE_NAME     "Compagnon"
-
-// ─── Wake word (mot clé vocal, non secret) ───────────────────────────────────
-#define WAKE_WORD           "Nestor"
-
-// ─── WiFi de développement (optionnel — laisser vide en prod) ────────────────
-// En production, le WiFi se configure depuis la PWA via BLE (WIFI_PROVISION).
-// Ces defines ne servent qu'au premier boot sans PWA disponible.
-#define WIFI_DEV_SSID       ""   // laisser vide si provisioning BLE
-#define WIFI_DEV_PASSWORD   ""   // laisser vide si provisioning BLE
-
-// ─── NE PAS AJOUTER DE CLÉS API ICI ─────────────────────────────────────────
-// Toutes les clés API sont gérées côté PWA (localStorage chiffré)
-// et poussées vers l'ESP32 via BLE → stockées en NVS namespace "api_keys".
-// Voir : pwa/src/device/device_settings.js + firmware/src/storage/nvs_mgr.h
+// Ne décommenter que pour le dev local :
+// #define DEV_BLE_NAME        "CompagnonV2"
+// #define DEV_WAKE_WORD       "nestor"
+// #define DEV_WIFI_SSID       "MonReseau"
+// #define DEV_WIFI_PASSWORD   "MonMotDePasse"
+// #define DEV_GROQ_API_KEY    "gsk_..."
+// #define DEV_GEMINI_API_KEY  "AIza..."

@@ -1,26 +1,35 @@
 #pragma once
-// =============================================================
-// CompagnonV2 — ui/status_bar.h
-// Barre de statut LVGL 9 — 440×36 px (safe area)
-//
-// Layout (gauche → droite) :
-//   [Date/heure FR]  [icône BLE]  [icône WiFi]  [jauge batterie %]
-//
-// Dépendances runtime :
-//   g_wifi_connected, g_ble_connected, g_battery_pct, g_charging
-//   (définis comme extern volatile dans main.cpp)
-// Horloge : rtc_get_time() ou time()/localtime() après NTP sync
-// =============================================================
+/*
+ * ui/status_bar.h — Barre de statut LVGL CompagnonV2
+ *
+ * Affiche (sur lv_layer_top, hauteur 36px) :
+ *   - Heure et date (NTP, timezone Europe/Paris)
+ *   - Icône Bluetooth (affiché si BLE device associé)
+ *   - Icône WiFi (affiché si connecté + niveau signal)
+ *   - Jauge batterie colorée + pourcentage :
+ *       vert   si ≥ 50%
+ *       orange si 20..49%
+ *       rouge  si < 20%
+ *     + éclair ⚡ si en charge
+ *   - Icône micro (animée quand wake word actif / STT en cours)
+ */
+
+#pragma once
 #include <lvgl.h>
 
-/**
- * @brief Crée les widgets de la status bar sur l'écran actif.
- *        À appeler après lv_init() et lv_display_create().
- */
-void status_bar_init();
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-/**
- * @brief Rafraîchit date/heure, icônes BLE/WiFi et jauge batterie.
- *        À appeler depuis task_os_main() toutes les 1s environ.
- */
-void status_bar_tick();
+void ui_status_bar_init(void);
+void ui_status_bar_tick(void);  // à appeler dans loop()
+
+// Mises à jour depuis les modules OS
+void ui_status_bar_set_ble(bool connected);
+void ui_status_bar_set_wifi(bool connected, int rssi);
+void ui_status_bar_set_battery(int pct, bool charging);
+void ui_status_bar_set_listening(bool active);  // animation mic
+
+#ifdef __cplusplus
+}
+#endif
