@@ -3,7 +3,6 @@
 // CompagnonV2 — pins.h
 // Source officielle : Waveshare ESP32-S3-Touch-AMOLED-2.16
 // Repo  : https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16
-// File  : examples/Arduino-v3.3.5/libraries/Mylibrary/pin_config.h
 // Toutes ces pins sont valides pour Arduino 3.3.5 ET 3.3.8
 //   (même matériel, même PCB, seule la version du core change).
 // =============================================================
@@ -41,16 +40,36 @@
 #define PIN_PA           46
 
 // ── BOUTONS ────────────────────────────────────────────────────
-#define PIN_BTN_BOOT     0   // BOOT / GPIO0 (INPUT_PULLUP)
-// Note : pas de boutons LEFT/RIGHT câblés sur la carte Waveshare,
-//        la navigation se fait uniquement via swipe tactile +
-//        bouton BOOT (court = action, long = retour).
+//
+//  3 boutons physiques sur la carte Waveshare :
+//
+//  ┌──────────┬────────┬────────────────────────────────────────────────────┐
+//  │ Bouton   │ GPIO   │ Actions                                            │
+//  ├──────────┼────────┼────────────────────────────────────────────────────┤
+//  │ +  (KEY) │ GPIO18 │ Court → tile suivante (carousel RIGHT)             │
+//  │          │        │ Long  → lancer l'app sélectionnée                  │
+//  ├──────────┼────────┼────────────────────────────────────────────────────┤
+//  │ -  (BOOT)│ GPIO0  │ Court → tile précédente (carousel LEFT)            │
+//  │          │        │ Long  → retour / quitter l'app active              │
+//  ├──────────┼────────┼────────────────────────────────────────────────────┤
+//  │ PWR      │ AXP    │ Court (PKEY_SHORT_IRQ) → allumer/éteindre backlight│
+//  │          │ I2C    │ Long  (PKEY_LONG_IRQ)  → arrêt complet (poweroff)  │
+//  └──────────┴────────┴────────────────────────────────────────────────────┘
+//
+//  Aucun conflit :
+//  - Touch CST816S : INT sur GPIO11, I2C — indépendant
+//  - IMU QMI8658   : I2C uniquement, pas de GPIO dédié
+//  - PWR géré par AXP2101 via IRQ I2C (pas de GPIO direct)
+//
+#define PIN_BTN_PLUS     18   // Bouton + (KEY)  — INPUT_PULLUP
+#define PIN_BTN_MINUS     0   // Bouton - (BOOT) — INPUT_PULLUP
+// PWR : géré via pmu_handle_irq() (PKEY_SHORT_IRQ / PKEY_LONG_IRQ)
 
 // ── I2C ADDRESSES ──────────────────────────────────────────────
 #define I2C_ADDR_AXP2101   0x34
 #define I2C_ADDR_CST816S   0x15
 #define I2C_ADDR_PCF85063  0x51
-#define I2C_ADDR_QMI8658   0x6B   // IMU (optionnel, non utilisé en v1)
+#define I2C_ADDR_QMI8658   0x6B   // IMU (optionnel)
 #define I2C_ADDR_ES7210    0x40
 #define I2C_ADDR_ES8311    0x18
 
