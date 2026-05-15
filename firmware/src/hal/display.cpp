@@ -1,154 +1,161 @@
 // ============================================================
-// CompagnonV2 — HAL Display — RM67162 QSPI
-// Waveshare AMOLED 2.16" 480×480
-//
-// Basé sur le driver officiel Waveshare Arduino + portage
-// Compagnon v1 (compagnon/src/hal/)
-//
-// QSPI : 4 lignes de données + 1 horloge + 1 CS
-// Refresh LVGL : double buffer PSRAM + DMA SPI
+// CompagnonV2 — hal/display.cpp
+// Pilote rm67162 QSPI 4-wire — Waveshare AMOLED 2.16"
+// Basé sur le pilote de Compagnon v1 (rm67162 QSPI)
+// Arduino 3.3.8 + LVGL 8.4.x
 // ============================================================
 #include "display.h"
 #include <SPI.h>
 
-// ─── Variables internes ───────────────────────────────────────────────────────
-static lv_display_t* _lv_disp    = nullptr;
-static lv_color_t*   _buf1       = nullptr;
-static lv_color_t*   _buf2       = nullptr;
-static bool          _display_on = false;
-static uint8_t       _brightness = 200;
+// ── Variables globales ─────────────────────────────────────────────────────
+static lv_disp_draw_buf_t  s_draw_buf;
+static lv_color_t*         s_buf1 = nullptr;
+static lv_color_t*         s_buf2 = nullptr;
+static lv_disp_drv_t       s_disp_drv;
+static bool                s_display_ready = false;
 
-// ─── Helpers bas niveau RM67162 ──────────────────────────────────────────────
+// ── Commandes rm67162 ──────────────────────────────────────────────────────
+#define RM67162_SLEEP_IN   0x10
+#define RM67162_SLEEP_OUT  0x11
+#define RM67162_DISPLAY_ON 0x29
+#define RM67162_CASET      0x2A
+#define RM67162_PASET      0x2B
+#define RM67162_RAMWR      0x2C
+#define RM67162_WBRIGHT    0x51
 
-static void rm67162_send_cmd(uint32_t cmd, const uint8_t* data, size_t len) {
-    // Mode CMD : SPI avec SCLK + SDIO0 (1-bit) ou QSPI (4-bit) selon phase
-    // Le RM67162 utilise la commande sur 1 octet en mode SPI standard
-    // puis les données en QSPI 4-bit pour les transferts pixel
+// ── SPI QSPI helper ──────────────────────────────────────────────────────
+static void _spi_write_cmd(uint8_t cmd) {
     digitalWrite(LCD_CS, LOW);
-    // DC=0 pour commande : on utilise SDIO0 en mode 1-bit
-    // Arduino SPI standard pour commandes (compatibilité maximale)
-    SPI.beginTransaction(SPISettings(80000000, MSBFIRST, SPI_MODE0));
-    SPI.transfer((uint8_t)(cmd & 0xFF));
-    if (data && len > 0) {
-        SPI.writeBytes(data, len);
-    }
+    // Mode SPI standard pour la commande (1 bit)
+    SPI.beginTransaction(SPISettings(40000000, MSBFIRST, SPI_MODE0));
+    SPI.transfer(0x02);      // write command prefix rm67162
+    SPI.transfer(cmd);
+    SPI.transfer(0x00);
     SPI.endTransaction();
     digitalWrite(LCD_CS, HIGH);
 }
 
-static void rm67162_reset(void) {
-    // LCD_RESET est partagé avec TOUCH_RES (cf. pins.h)
+static void _spi_write_data(const uint8_t* data, size_t len) {
+    digitalWrite(LCD_CS, LOW);
+    SPI.beginTransaction(SPISettings(40000000, MSBFIRST, SPI_MODE0));
+    SPI.transfer(0x32);      // write data prefix rm67162
+    SPI.transfer(0x00);
+    for (size_t i = 0; i < len; i++) SPI.transfer(data[i]);
+    SPI.endTransaction();
+    digitalWrite(LCD_CS, HIGH);
+}
+
+static void _write_reg(uint8_t cmd, uint8_t val) {
+    uint8_t buf[1] = { val };
+    _spi_write_cmd(cmd);
+    _spi_write_data(buf, 1);
+}
+
+// ── Initialisation du panel rm67162 ───────────────────────────────────────
+static void _rm67162_init_sequence() {
+    // Reset hardware
     digitalWrite(LCD_RESET, LOW);
-    delay(10);
+    delay(20);
     digitalWrite(LCD_RESET, HIGH);
     delay(120);
-}
 
-static void rm67162_init_sequence(void) {
-    // Séquence d'initialisation RM67162 pour Waveshare AMOLED 2.16"
-    // Source : datasheet RM67162 + Waveshare sample code
-    const uint8_t d0[]  = {0x00};
-    const uint8_t d1[]  = {0x5A};
-    const uint8_t d2[]  = {0x3B};
-    const uint8_t d3[]  = {0x00, 0x00, 0x01, 0xDF}; // CASET 0..479
-    const uint8_t d4[]  = {0x00, 0x00, 0x01, 0xDF}; // RASET 0..479
-    const uint8_t d5[]  = {0x55};  // RGB565
-    const uint8_t d6[]  = {0x20};  // TEARING OFF
-    const uint8_t d7[]  = {0x28};  // Backlight control
-
-    rm67162_send_cmd(0xFE, d1, 1);   // Enter CMD2
-    rm67162_send_cmd(0xC4, d0, 1);
-    rm67162_send_cmd(0xFE, d0, 1);   // Back to CMD1
-    rm67162_send_cmd(0x35, nullptr, 0); // TEARING ON
-    rm67162_send_cmd(0x3A, d5, 1);   // Interface Pixel Format RGB565
-    rm67162_send_cmd(0x2A, d3, 4);   // Column addr 0..479
-    rm67162_send_cmd(0x2B, d4, 4);   // Row addr 0..479
-    rm67162_send_cmd(0x11, nullptr, 0); // Sleep Out
+    _spi_write_cmd(RM67162_SLEEP_OUT);
     delay(120);
-    rm67162_send_cmd(0x29, nullptr, 0); // Display ON
-    delay(20);
 
-    _display_on = true;
+    // DSI command set typique rm67162 AMOLED
+    _write_reg(0xFE, 0x04);
+    _write_reg(0x4E, 0x02);
+    _write_reg(0xFE, 0x05);
+    _write_reg(0xFB, 0x01);
+    _write_reg(0xFE, 0x00);
+
+    // Interface pixel format : 16bpp RGB565
+    _write_reg(0x3A, 0x75);
+
+    // Memory access control (landscape, RGB)
+    _write_reg(0x36, 0x00);
+
+    // Luminosité par défaut 50%
+    _write_reg(RM67162_WBRIGHT, 0x80);
+
+    delay(50);
+    _spi_write_cmd(RM67162_DISPLAY_ON);
+    delay(50);
 }
 
-// ─── LVGL flush callback ──────────────────────────────────────────────────────
+// ── Callback LVGL flush ────────────────────────────────────────────────────
+void display_flush_cb(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* color_p) {
+    // Définit la fenêtre de dessin
+    uint16_t x1 = area->x1, x2 = area->x2;
+    uint16_t y1 = area->y1, y2 = area->y2;
 
-static void lvgl_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
-    // Calcul de la fenêtre de pixels
-    uint16_t x1 = area->x1;
-    uint16_t x2 = area->x2;
-    uint16_t y1 = area->y1;
-    uint16_t y2 = area->y2;
-    uint32_t len = (x2 - x1 + 1) * (y2 - y1 + 1) * 2; // RGB565 = 2 octets/pixel
+    uint8_t caset[4] = { (uint8_t)(x1 >> 8), (uint8_t)(x1), (uint8_t)(x2 >> 8), (uint8_t)(x2) };
+    uint8_t paset[4] = { (uint8_t)(y1 >> 8), (uint8_t)(y1), (uint8_t)(y2 >> 8), (uint8_t)(y2) };
 
-    // CASET + RASET
-    uint8_t caset[4] = {(uint8_t)(x1 >> 8), (uint8_t)(x1), (uint8_t)(x2 >> 8), (uint8_t)(x2)};
-    uint8_t raset[4] = {(uint8_t)(y1 >> 8), (uint8_t)(y1), (uint8_t)(y2 >> 8), (uint8_t)(y2)};
-    rm67162_send_cmd(0x2A, caset, 4);
-    rm67162_send_cmd(0x2B, raset, 4);
+    _spi_write_cmd(RM67162_CASET);
+    _spi_write_data(caset, 4);
+    _spi_write_cmd(RM67162_PASET);
+    _spi_write_data(paset, 4);
+    _spi_write_cmd(RM67162_RAMWR);
 
-    // RAMWR + transfert pixels
+    // Envoi des pixels (RGB565 big-endian)
+    uint32_t pixel_count = (x2 - x1 + 1) * (y2 - y1 + 1);
     digitalWrite(LCD_CS, LOW);
-    SPI.beginTransaction(SPISettings(80000000, MSBFIRST, SPI_MODE0));
-    SPI.transfer(0x2C); // RAMWR cmd
-    SPI.writeBytes(px_map, len);
+    SPI.beginTransaction(SPISettings(40000000, MSBFIRST, SPI_MODE0));
+    SPI.transfer(0x32);
+    SPI.transfer(0x00);
+    SPI.writeBytes((uint8_t*)color_p, pixel_count * 2);
     SPI.endTransaction();
     digitalWrite(LCD_CS, HIGH);
 
-    lv_display_flush_ready(disp);
+    lv_disp_flush_ready(drv);
 }
 
-// ─── API publique ─────────────────────────────────────────────────────────────
-
-void hal_display_init(void) {
-    // Config GPIO
+// ── Init publique ──────────────────────────────────────────────────────────
+bool display_init() {
+    // SPI QSPI sur les pins définies dans pins.h
+    SPI.begin(LCD_SCLK, -1, LCD_SDIO0, LCD_CS);
     pinMode(LCD_CS,    OUTPUT);
-    pinMode(LCD_SCLK,  OUTPUT);
     pinMode(LCD_RESET, OUTPUT);
     digitalWrite(LCD_CS, HIGH);
 
-    // SPI bus — QSPI full n'est pas dispo via Arduino SPI standard
-    // On utilise SPI.begin avec les pins QSPI0/SCLK/CS pour la compat
-    // Le QSPI 4-bit réel nécessitera esp_lcd_panel_io (possible en Phase 2)
-    SPI.begin(LCD_SCLK, LCD_SDIO1, LCD_SDIO0, LCD_CS);
+    _rm67162_init_sequence();
 
-    // Reset hardware
-    rm67162_reset();
+    // Alloue les deux buffers DMA en PSRAM
+    s_buf1 = (lv_color_t*) ps_malloc(DISP_BUF_SIZE * sizeof(lv_color_t));
+    s_buf2 = (lv_color_t*) ps_malloc(DISP_BUF_SIZE * sizeof(lv_color_t));
+    if (!s_buf1 || !s_buf2) {
+        Serial.println("[DISPLAY] ERREUR: impossible d'allouer les buffers LVGL en PSRAM");
+        return false;
+    }
 
-    // Séquence init RM67162
-    rm67162_init_sequence();
+    lv_disp_draw_buf_init(&s_draw_buf, s_buf1, s_buf2, DISP_BUF_SIZE);
 
-    // Allocate LVGL draw buffers in PSRAM
-    _buf1 = (lv_color_t*) ps_malloc(DISP_BUF_SIZE * sizeof(lv_color_t));
-    _buf2 = (lv_color_t*) ps_malloc(DISP_BUF_SIZE * sizeof(lv_color_t));
-    assert(_buf1 != nullptr && _buf2 != nullptr);
+    lv_disp_drv_init(&s_disp_drv);
+    s_disp_drv.hor_res  = SCREEN_W;
+    s_disp_drv.ver_res  = SCREEN_H;
+    s_disp_drv.flush_cb = display_flush_cb;
+    s_disp_drv.draw_buf = &s_draw_buf;
+    lv_disp_drv_register(&s_disp_drv);
 
-    // Enregistrement display LVGL 9
-    _lv_disp = lv_display_create(SCREEN_W, SCREEN_H);
-    lv_display_set_flush_cb(_lv_disp, lvgl_flush_cb);
-    lv_display_set_buffers(_lv_disp, _buf1, _buf2,
-                           DISP_BUF_SIZE * sizeof(lv_color_t),
-                           LV_DISPLAY_RENDER_MODE_PARTIAL);
-
-    Serial.printf("[HAL] Display RM67162 init OK — %dx%d\n", SCREEN_W, SCREEN_H);
+    s_display_ready = true;
+    Serial.printf("[DISPLAY] rm67162 init OK — %dx%d, bufs PSRAM OK\n", SCREEN_W, SCREEN_H);
+    return true;
 }
 
-void hal_display_on(void) {
-    rm67162_send_cmd(0x29, nullptr, 0); // Display ON
-    _display_on = true;
+void display_set_brightness(uint16_t brightness) {
+    _write_reg(RM67162_WBRIGHT, (uint8_t)constrain(brightness, 0, 255));
 }
 
-void hal_display_off(void) {
-    rm67162_send_cmd(0x28, nullptr, 0); // Display OFF
-    _display_on = false;
+uint16_t display_get_brightness() { return 128; }  // TODO: lire registre
+
+void display_sleep() {
+    _spi_write_cmd(RM67162_SLEEP_IN);
+    delay(5);
 }
 
-void hal_display_set_brightness(uint8_t brightness) {
-    _brightness = brightness;
-    uint8_t d[] = {brightness};
-    rm67162_send_cmd(0x51, d, 1); // Write display brightness
-}
-
-bool hal_display_is_on(void) {
-    return _display_on;
+void display_wake() {
+    _spi_write_cmd(RM67162_SLEEP_OUT);
+    delay(120);
+    _spi_write_cmd(RM67162_DISPLAY_ON);
 }

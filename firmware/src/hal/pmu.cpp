@@ -1,86 +1,81 @@
 // ============================================================
-// CompagnonV2 — HAL PMU — AXP2101 (XPowersLib)
+// CompagnonV2 — hal/pmu.cpp
+// AXP2101 via XPowersLib 0.2.x
 // ============================================================
 #include "pmu.h"
 
-static XPowersPMU   _pmu;
-static pmu_status_t _status = {false, false, 50, 3700, PMU_BAT_COLOR_GREEN};
+static XPowersPMU s_pmu;
+static BatteryInfo s_batt_info = {0, 0.0f, false, false};
+static portMUX_TYPE s_batt_mux = portMUX_INITIALIZER_UNLOCKED;
 
-// IRQ handler (IRAM_ATTR pour être exécuté depuis IRAM même en cache miss)
-static volatile bool _pmu_irq = false;
-IRAM_ATTR void pmu_irq_handler(void) {
-    _pmu_irq = true;
+// ── IRQ PMU ────────────────────────────────────────────────────────────────
+static volatile bool s_pmu_irq = false;
+
+static void IRAM_ATTR _pmu_irq_handler() {
+    s_pmu_irq = true;
 }
 
-bool hal_pmu_init(void) {
-    bool ok = _pmu.begin(Wire, AXP2101_SLAVE_ADDRESS, IIC_SDA, IIC_SCL);
-    if (!ok) {
-        Serial.println("[HAL] PMU AXP2101 NOT found!");
+// ── Init ───────────────────────────────────────────────────────────────────
+bool pmu_init() {
+    if (!s_pmu.begin(Wire, AXP2101_SLAVE_ADDRESS, IIC_SDA, IIC_SCL)) {
+        Serial.println("[PMU] ERREUR: AXP2101 non détecté");
         return false;
     }
 
-    // Configuration des rails de puissance Waveshare AMOLED 2.16"
-    // DCDC1 = 3.3V MCU
-    _pmu.setDC1Voltage(3300);
-    _pmu.enableDC1();
-    // ALDO2 = 3.3V capteur / périphériques
-    _pmu.setALDO2Voltage(3300);
-    _pmu.enableALDO2();
-    // ALDO3 = 3.3V SD card
-    _pmu.setALDO3Voltage(3300);
-    _pmu.enableALDO3();
-    // ALDO4 = 3.3V AMOLED VDDIO
-    _pmu.setALDO4Voltage(3300);
-    _pmu.enableALDO4();
-    // BLDO1 = 1.8V pour le RM67162 IOVDD
-    _pmu.setBLDO1Voltage(1800);
-    _pmu.enableBLDO1();
+    // Tension DCDC et LDO pour l'écran AMOLED et les périphériques
+    s_pmu.setPowerChannelVoltage(XPOWERS_DCDC1, 3300);  // VDD3.3
+    s_pmu.enablePowerOutput(XPOWERS_DCDC1);
+    s_pmu.setPowerChannelVoltage(XPOWERS_ALDO2, 1800);  // VDDIO 1.8V
+    s_pmu.enablePowerOutput(XPOWERS_ALDO2);
+    s_pmu.setPowerChannelVoltage(XPOWERS_ALDO3, 3300);  // LCD power
+    s_pmu.enablePowerOutput(XPOWERS_ALDO3);
 
-    // Charge rapide 500mA
-    _pmu.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_500MA);
-    _pmu.enableCharge();
+    // Courant de charge 500 mA
+    s_pmu.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_500MA);
 
-    // IRQ batterie
-    _pmu.clearIrqStatus();
-    _pmu.enableBatChargeDoneIrq();
-    _pmu.enableBatInsertIrq();
-    _pmu.enableBatRemoveIrq();
-    attachInterrupt(digitalPinToInterrupt(AXP_INT), pmu_irq_handler, FALLING);
+    // IRQ sur broche AXP_INT
+    s_pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+    s_pmu.enableIRQ(XPOWERS_AXP2101_BAT_INSERT_IRQ |
+                    XPOWERS_AXP2101_BAT_REMOVE_IRQ |
+                    XPOWERS_AXP2101_VBUS_INSERT_IRQ |
+                    XPOWERS_AXP2101_VBUS_REMOVE_IRQ);
+    s_pmu.clearIRQ();
 
-    // Lecture initiale
-    hal_pmu_tick();
+    pinMode(AXP_INT, INPUT);
+    attachInterrupt(digitalPinToInterrupt(AXP_INT), _pmu_irq_handler, FALLING);
 
-    Serial.printf("[HAL] PMU AXP2101 init OK — bat %d%%\n", _status.battery_pct);
+    Serial.println("[PMU] AXP2101 init OK");
     return true;
 }
 
-void hal_pmu_tick(void) {
-    if (_pmu_irq) {
-        _pmu.getIrqStatus();
-        _pmu.clearIrqStatus();
-        _pmu_irq = false;
+// ── Tick ~1s ───────────────────────────────────────────────────────────────
+void pmu_tick() {
+    if (s_pmu_irq) {
+        s_pmu.clearIRQ();
+        s_pmu_irq = false;
     }
 
-    _status.charging     = _pmu.isCharging();
-    _status.usb_present  = _pmu.isVbusIn();
-    _status.battery_pct  = _pmu.getBatteryPercent();
-    _status.voltage_mv   = _pmu.getBattVoltage();
+    BatteryInfo b;
+    b.percent     = (uint8_t)s_pmu.getBatteryPercent();
+    b.voltage     = s_pmu.getBattVoltage();
+    b.charging    = s_pmu.isCharging();
+    b.usb_present = s_pmu.isVbusIn();
 
-    if (_status.battery_pct > PMU_BAT_OK) {
-        _status.color = PMU_BAT_COLOR_GREEN;
-    } else if (_status.battery_pct > PMU_BAT_LOW) {
-        _status.color = PMU_BAT_COLOR_ORANGE;
-    } else {
-        _status.color = PMU_BAT_COLOR_RED;
-    }
+    portENTER_CRITICAL(&s_batt_mux);
+    s_batt_info = b;
+    portEXIT_CRITICAL(&s_batt_mux);
 }
 
-const pmu_status_t* hal_pmu_get_status(void) {
-    return &_status;
+// ── Getter thread-safe ─────────────────────────────────────────────────────
+BatteryInfo pmu_get_battery() {
+    BatteryInfo b;
+    portENTER_CRITICAL(&s_batt_mux);
+    b = s_batt_info;
+    portEXIT_CRITICAL(&s_batt_mux);
+    return b;
 }
 
-void hal_pmu_power_off(void) {
-    Serial.println("[HAL] Power OFF");
-    delay(100);
-    _pmu.shutdown();
+void pmu_set_charging_led(bool on) {
+    // LED de charge via CHG_LED AXP2101
+    on ? s_pmu.enableChargingLed() : s_pmu.disableChargingLed();
 }

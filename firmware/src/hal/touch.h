@@ -1,39 +1,22 @@
 #pragma once
 // ============================================================
-// CompagnonV2 — HAL Touch
-// Contrôleur : CST816S (I2C)
-// I2C partagé avec PMU (AXP2101) et RTC (PCF85063)
-// IRQ touch sur GPIO dédié ou partagé selon config
+// CompagnonV2 — hal/touch.h
+// Pilote tactile CST816S I2C
+// Waveshare ESP32-S3 AMOLED 2.16"
 // ============================================================
 #include <Arduino.h>
 #include <Wire.h>
+#include <lvgl.h>
 #include "../config/pins.h"
+#include "../config/ui_config.h"
 
-// Adresse I2C du CST816S
-#define CST816S_ADDR   0x15
+#define CST816S_ADDR     0x15
+#define CST816S_REG_GEST 0x01
+#define CST816S_REG_NPTS 0x02
+#define CST816S_REG_XH   0x03
+#define CST816S_REG_XL   0x04
+#define CST816S_REG_YH   0x05
+#define CST816S_REG_YL   0x06
 
-// Seuils
-#define TOUCH_MAX_POINTS 1   // CST816S = single touch
-
-typedef struct {
-    bool     pressed;   // true si un doigt est posé
-    int16_t  x;
-    int16_t  y;
-    uint8_t  gesture;  // 0=none, 1=swipe_up, 2=swipe_down, 3=swipe_left, 4=swipe_right
-} touch_data_t;
-
-/**
- * @brief Initialise le CST816S et enregistre l'indev LVGL touch.
- *        À appeler après hal_display_init().
- */
-void hal_touch_init(void);
-
-/**
- * @brief Lit les données de touch brutes (pour debug ou usage hors LVGL).
- */
-bool hal_touch_read(touch_data_t* out);
-
-/**
- * @brief Callback indev LVGL (enregistré en interne, ne pas appeler manuellement).
- */
-void hal_touch_lvgl_read_cb(lv_indev_t* indev, lv_indev_data_t* data);
+bool touch_init();
+void touch_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data);
