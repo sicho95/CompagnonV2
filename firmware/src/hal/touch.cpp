@@ -1,25 +1,27 @@
 // =============================================================
 // CompagnonV2 — hal/touch.cpp
+// Driver CST9220 — API LVGL 9
 // =============================================================
 #include "touch.h"
 
-SensorCST816S touch;
+SensorCST9220 touch;
 
 bool touch_init() {
-    // RST et INT sont gérés par SensorLib
-    if (!touch.begin(Wire, I2C_ADDR_CST816S, PIN_IIC_SDA, PIN_IIC_SCL)) {
-        Serial.println("[HAL] Touch CST816S NOT found!");
+    // SensorLib initialise le bus I2C en interne si besoin
+    if (!touch.begin(Wire, CST9220_SLAVE_ADDRESS, PIN_IIC_SDA, PIN_IIC_SCL)) {
+        Serial.println("[HAL] Touch CST9220 NOT found!");
         return false;
     }
-    touch.setCSTMode(CST816S_MODE_INTERRUPT); // mode interruption
-    Serial.println("[HAL] Touch CST816S init OK");
+    Serial.println("[HAL] Touch CST9220 init OK");
     return true;
 }
 
-void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data) {
+// Callback LVGL 9 : signature lv_indev_read_cb_t
+// (lv_indev_t* remplace lv_indev_drv_t* de LVGL 8)
+void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     if (touch.isAvailable()) {
-        data->point.x = touch.getX();
-        data->point.y = touch.getY();
+        data->point.x = (lv_coord_t)touch.getX();
+        data->point.y = (lv_coord_t)touch.getY();
         data->state   = LV_INDEV_STATE_PRESSED;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
