@@ -1,27 +1,13 @@
-#pragma once
-/*
- * secrets_template.h — Template de développement UNIQUEMENT
+/**
+ * secrets_template.h — DEV UNIQUEMENT
+ * Copier en secrets.h (non commité, dans .gitignore)
  *
- * CE FICHIER EST POUR LE DEV LOCAL UNIQUEMENT.
- * En production, toutes les valeurs ci-dessous sont
- * configurées depuis la PWA CompagnonV2 via BLE → NVS.
- *
- * Usage :
- *   1. Copier ce fichier vers secrets.h
- *   2. Remplir les valeurs pour vos tests
- *   3. Ne jamais commiter secrets.h (ajouté au .gitignore)
- *
- * Paramètres configurables depuis la PWA :
- *   - BLE_DEVICE_NAME  → NVS key "ble_name"
- *   - WAKE_WORD        → NVS key "wake_word"
- *   - WiFi SSID/PWD    → NVS via commande BLE wifi_provision
- *   - Toutes les API keys → NVS via commande BLE set_api_key
+ * EN PRODUCTION : tous les paramètres (WiFi, BLE name, wake word,
+ * clés API) sont configurés UNIQUEMENT depuis la PWA et poussés
+ * via BLE → NVS. Ce fichier ne sert qu'au flash initial de dev.
  */
+#pragma once
 
-// Ne décommenter que pour le dev local :
-// #define DEV_BLE_NAME        "CompagnonV2"
-// #define DEV_WAKE_WORD       "nestor"
-// #define DEV_WIFI_SSID       "MonReseau"
-// #define DEV_WIFI_PASSWORD   "MonMotDePasse"
-// #define DEV_GROQ_API_KEY    "gsk_..."
-// #define DEV_GEMINI_API_KEY  "AIza..."
+// SSID optionnel pour dev (laisser vide en prod)
+#define DEV_WIFI_SSID ""
+#define DEV_WIFI_PASS ""
