@@ -1,6 +1,6 @@
 # CompagnonV2 — Spécification fonctionnelle complète
 
-> Version v2.3 — mai 2026  
+> Version v2.4 — mai 2026  
 > Fusion de Compagnon (PWA + firmware) et Compagnon2 (voice OS + agents mimiclaw)
 
 ---
@@ -10,12 +10,16 @@
 | Composant | Version choisie | Raison |
 |-----------|----------------|--------|
 | **Arduino ESP32** | **3.3.8** | Dernière stable, basée sur IDF 5.5.4 |
-| **LVGL** | **8.4.x** | Version 8 éprouvée et stable avec Arduino ESP32 (v9 instable avec Arduino) |
+| **LVGL** | **9.x** | Version 9 supportée par Arduino ESP32 3.3.8, API moderne |
 | **Build system** | **PlatformIO** (platformio.ini) | Gestion précise des versions de librairies |
 | **Arduino_GFX_Library** | dernière stable | Driver CO5300 QSPI (moononournation) |
-| **SensorLib** | dernière stable | Touch CST816S + RTC PCF85063 + IMU QMI8658 |
+| **SensorLib** | dernière stable | Touch **CST9220** + RTC PCF85063 + IMU QMI8658 |
 | **XPowersLib** | **0.2.x** | Pilote officiel AXP2101 |
 | **ArduinoJson** | **7.3.x** | API moderne, zéro copie |
+
+> **Note LVGL 9** : l'API a changé par rapport à LVGL 8 :
+> `lv_display_create()`, `lv_indev_set_type()`, `lv_draw_buf_t` (plus de `lv_disp_draw_buf_t`).
+> Tout le code UI est à écrire directement en API v9 — ne pas recycler de code v8.
 
 > **Note sur les clés API** : aucune clé n'est stockée dans le firmware.
 > Toutes les clés (Groq, OpenWeatherMap, etc.) sont saisies dans la PWA
@@ -76,7 +80,7 @@ CompagnonV2/
 │       ├── device/        (provisioning WiFi, device_settings)
 │       └── ui/            (app-shell, launcher, 8 app-views)
 └── firmware/
-    ├── platformio.ini     ← Arduino 3.3.8 + LVGL 8.4.x
+    ├── platformio.ini     ← Arduino 3.3.8 + LVGL 9.x
     ├── partitions/
     │   └── compagnon_16mb.csv
     └── src/
@@ -84,11 +88,11 @@ CompagnonV2/
         ├── config/
         │   ├── pins.h             ← pins officielles Waveshare (3 boutons inclus)
         │   ├── ui_config.h        ← safe area BORDER_H=20, BORDER_V=10
-        │   ├── lv_conf.h          ← LVGL 8.4.x
+        │   ├── lv_conf.h          ← LVGL 9.x
         │   └── secrets_template.h ← dev uniquement, NO clés API
         ├── hal/
         │   ├── display.h/.cpp     ← CO5300 QSPI (Arduino_GFX)
-        │   ├── touch.h/.cpp       ← CST816S I2C (SensorLib)
+        │   ├── touch.h/.cpp       ← CST9220 I2C (SensorLib)
         │   ├── pmu.h/.cpp         ← AXP2101 (XPowersLib) + pmu_event_t
         │   ├── rtc.h/.cpp         ← PCF85063 I2C (SensorLib)
         │   └── audio_io.h/.cpp    ← ES7210 (mic) + ES8311 (DAC) I2S
@@ -105,21 +109,24 @@ CompagnonV2/
 
 ## 3. Hardware — Pins et boutons
 
-### 3.1 Pins (source officielle Waveshare pin_config.h — identiques 3.3.5 et 3.3.8)
+### 3.1 Pins (source officielle Waveshare ESP32-S3-Touch-AMOLED-2.16)
 
 | Périphérique | Pins |
 |---|---|
 | Display CO5300 QSPI | SDIO0=4, SDIO1=5, SDIO2=6, SDIO3=7, SCLK=38, RST=2, CS=12 |
 | I2C bus (partagé) | SDA=15, SCL=14 |
-| Touch CST816S | INT=11, RST=2 (partagé LCD_RST) |
+| Touch **CST9220** | INT=11, sur I2C bus (SDA=15, SCL=14) |
+| IMU QMI8658 | sur I2C bus |
+| RTC PCF85063 | sur I2C bus |
+| PMU AXP2101 | sur I2C bus, IRQ = bouton PWR |
 | Audio ES7210 (mic) | BCLK=9, LRCK=45, DIN=10, MCLK=16 |
 | Audio ES8311 (DAC) | DOUT=8, BCLK/LRCK/MCLK partagés |
 | Ampli PA | GPIO46 |
 | Bouton + (KEY) | GPIO18 |
 | Bouton − (BOOT) | GPIO0 |
-| Bouton PWR | AXP2101 I2C (IRQ) |
+| Bouton PWR | AXP2101 I2C IRQ |
 
-> Display physique : 466×466 px (CO5300). Safe area logique : 480×480 px référence LVGL.
+> Display physique : 466×466 px (CO5300). Référence LVGL : 480×480 px virtuel.
 > Les coordonnées CO5300 doivent être paires — `display_rounder_cb()` s'en charge.
 
 ### 3.2 Mapping boutons
@@ -128,9 +135,9 @@ CompagnonV2/
 |--------|-------------|------------|
 | **+** GPIO18 | Tile suivante (carousel →) | Lancer l'app sélectionnée |
 | **−** GPIO0 | Tile précédente (carousel ←) | Retour / quitter l'app active |
-| **PWR** AXP IRQ | Toggle backlight (PKEY_SHORT_IRQ) | Arrêt complet `pmu.shutdown()` (PKEY_LONG_IRQ) |
+| **PWR** AXP IRQ | Toggle backlight (PKEY_SHORT_IRQ) | Arrêt complet `pmu_poweroff()` (PKEY_LONG_IRQ) |
 
-Aucun conflit : touch sur INT GPIO11 (I2C), IMU sur I2C, boutons sur GPIO indépendants.
+Aucun conflit : touch CST9220 sur INT GPIO11 (I2C), IMU/RTC sur I2C, boutons sur GPIO indépendants.
 
 ### 3.3 pmu_event_t
 
@@ -151,7 +158,7 @@ typedef enum {
 | Core | Tâches |
 |------|--------|
 | Core 0 | wake word (ESP-SR), audio I2S capture/playback, BLE, WiFi, timers réseau |
-| Core 1 | LVGL render, touch/boutons, OS main tick, agent brain ReAct, orchestrateur apps |
+| Core 1 | LVGL 9 render, touch CST9220/boutons, OS main tick, agent brain ReAct, orchestrateur apps |
 
 ### 4.2 Tâches FreeRTOS
 
@@ -167,12 +174,12 @@ typedef enum {
 ### 4.3 RAM apps
 
 - Interface `AppBase` : `init()` / `start()` / `stop()` / `tick()`.
-- `start()` = alloue UI LVGL + buffers.
+- `start()` = alloue UI LVGL 9 + buffers.
 - `stop()` = libère tout → RAM minimale quand aucune app n'est active.
 
 ### 4.4 Light sleep
 
-Réveil : wake word (ESP-SR Core 0), timer RTC (rappels), bouton physique, touch screen.
+Réveil : wake word (ESP-SR Core 0), timer RTC PCF85063 (rappels), bouton physique, touch CST9220.
 
 ---
 
@@ -199,13 +206,13 @@ Réveil : wake word (ESP-SR Core 0), timer RTC (rappels), bouton physique, touch
 
 ---
 
-## 6. UI LVGL 8 — Safe area + Status bar + Launcher
+## 6. UI LVGL 9 — Safe area + Status bar + Launcher
 
 ### 6.1 Safe area (boîtier arrondi)
 
 ```
 Ecran physique : 466 × 466 px (CO5300)
-Référence LVGL : 480 × 480 px
+Référence LVGL : 480 × 480 px virtuel
 BORDER_H = 20 px  (gauche ET droite)
 BORDER_V = 10 px  (haut ET bas)
 Zone logique : x=20, y=10, w=440, h=460 px
@@ -221,10 +228,11 @@ Définis dans `config/ui_config.h`.
 - Icône BLE (si apparié) + icône WiFi (si connecté).
 - Jauge batterie : fill coloré (vert > 30%, orange 15–30%, rouge < 15%), % DANS la jauge.
 - Données batterie via `pmu_battery_percent()` / `pmu_is_charging()`.
+- Implémenté avec `lv_label_t`, `lv_bar_t`, `lv_obj_set_style_*` en **API LVGL 9**.
 
 ### 6.3 Launcher carousel
 
-- `lv_tileview` 8 tiles, swipe tactile + boutons GPIO18 (+) / GPIO0 (−).
+- `lv_tileview` 8 tiles, swipe tactile CST9220 + boutons GPIO18 (+) / GPIO0 (−).
 - Appui long GPIO18 → `app_start()` de la tile active.
 - Appui long GPIO0 → retour / `app_stop()`.
 
@@ -235,7 +243,7 @@ Définis dans `config/ui_config.h`.
 - Wake word : **ESP-SR**, Core 0, depuis light sleep.
 - STT : **Groq Whisper** (WiFi) ou BLE relay.
 - TTS : **Groq PlayAI** → Web Speech via BLE → sons I2S ES8311.
-- Bouton micro LVGL dans Nestor + Rappels.
+- Bouton micro LVGL 9 dans Nestor + Rappels.
 - Mode silencieux : flag NVS (configurable PWA).
 
 ---
@@ -244,7 +252,7 @@ Définis dans `config/ui_config.h`.
 
 - Création : formulaire PWA, texte libre, ou voix (wake word → STT → agent Rappels).
 - Modèle : `id`, `title`, `body`, `datetime`, `advance_minutes`, `repeat`, `status`.
-- Réveil : timer RTC PCF85063 → light sleep exit → son ES8311 + TTS + UI.
+- Réveil : timer RTC PCF85063 → light sleep exit → son ES8311 + TTS + UI LVGL 9.
 - Sync : `REMINDERS_SYNC` BLE.
 
 ---
@@ -280,10 +288,10 @@ Définis dans `config/ui_config.h`.
 
 | Phase | Étape | Statut | Notes |
 |-------|-------|--------|-------|
-| **Phase 1** | Step 1 : Squelette firmware (platformio.ini Arduino 3.3.8 + LVGL 8.4, partitions, config, FreeRTOS skeleton) | ✅ | |
-| | Step 2 : HAL complet (display CO5300 QSPI, touch CST816S, PMU AXP2101 + pmu_event_t, RTC PCF85063, audio ES7210+ES8311) | ✅ | 3 boutons mappés (GPIO18/0/PWR IRQ) |
-| | Step 3 : Status bar LVGL 8 (date FR, BLE/WiFi icônes, jauge batterie colorée) | 🔜 | |
-| | Step 4 : Launcher carousel 8 apps (tileview, swipe, boutons) | 🔜 | |
+| **Phase 1** | Step 1 : Squelette firmware (platformio.ini Arduino 3.3.8 + LVGL **9.x**, partitions, config, FreeRTOS skeleton) | ✅ | |
+| | Step 2 : HAL complet (display CO5300 QSPI, touch **CST9220**, PMU AXP2101 + pmu_event_t, RTC PCF85063, audio ES7210+ES8311) | ✅ | 3 boutons mappés (GPIO18/0/PWR IRQ) |
+| | Step 3 : Status bar LVGL **9** (date FR, BLE/WiFi icônes, jauge batterie colorée) | 🔜 | |
+| | Step 4 : Launcher carousel 8 apps (tileview LVGL 9, swipe CST9220, boutons GPIO) | 🔜 | |
 | | Step 5 : NVS + FATFS + SD optionnel | 🔜 | |
 | | Step 6 : WiFi manager | 🔜 | |
 | **Phase 2** | Step 7 : BLE 8 caractéristiques | 🔜 | |
