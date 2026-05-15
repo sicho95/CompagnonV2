@@ -1,37 +1,21 @@
-#pragma once
-// =============================================================
+// ============================================================
 // CompagnonV2 — hal/rtc.h
-// Driver : PCF85063 RTC I2C (via SensorLib)
-// Rôle   : heure locale, wakeup timer pour rappels
-// =============================================================
-#include <Wire.h>
-#include <SensorLib.h>
-#include "../config/pins.h"
+// PCF85063 RTC — heure offline garantie au boot
+// ============================================================
+#pragma once
+#include <time.h>
+#include <stdbool.h>
 
-extern SensorPCF85063 rtc;
+namespace hal {
 
-/**
- * @brief Initialise le PCF85063.
- * @return true si RTC répond.
- */
-bool rtc_init();
+bool   rtc_init();                    // init PCF85063 via I2C
+bool   rtc_is_valid();                // true si heure jamais réglée
+void   rtc_apply_to_system();         // PCF85063 → settimeofday()
+void   rtc_sync_from_ntp(time_t epoch); // NTP epoch → PCF85063 + system
+void   rtc_sync_from_pwa(time_t epoch); // BLE SET_TIME → PCF85063 + system
+time_t rtc_get_epoch();               // lit epoch UTC depuis PCF85063
+struct tm rtc_get_local_time();       // epoch → localtime (TZ Europe/Paris)
+void   rtc_set_alarm(time_t epoch);   // programme alarme matérielle
+void   rtc_clear_alarm();
 
-/**
- * @brief Synchronise la RTC depuis NTP (appeler après WiFi connect).
- * @param epoch  timestamp Unix UTC.
- */
-void rtc_sync_from_ntp(time_t epoch);
-
-/**
- * @brief Retourne l'heure locale comme struct tm (TZ Europe/Paris).
- */
-struct tm rtc_get_local_time();
-
-/**
- * @brief Programme une alarme one-shot pour le réveil light-sleep.
- * @param epoch  timestamp Unix UTC du réveil souhaité.
- */
-void rtc_set_alarm(time_t epoch);
-
-/** @brief Annule l'alarme en cours. */
-void rtc_clear_alarm();
+} // namespace hal

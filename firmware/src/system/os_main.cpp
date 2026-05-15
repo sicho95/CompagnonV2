@@ -1,164 +1,113 @@
 // ============================================================
-// os_main.cpp — Orchestrateur OS CompagnonV2
+// CompagnonV2 — system/os_main.cpp
+// Lancement tâches FreeRTOS dual-core
 //
-// 2 taches sur Core 1 :
-//   task_ui_lvgl  (prio 5) : lv_timer_handler() toutes les 5 ms
-//   task_os_main  (prio 4) : BLE, WiFi, PMU, NTP, rappels, BLE
-//
-// 2 taches sur Core 0 :
-//   task_voice_io      (prio 5) : VAD + wake word + capture
-//   task_stt_consumer  (prio 3) : Groq STT
-//
-// Le mutex g_lvgl_mutex sécurise tous les accès LVGL
+// Core 0 : task_voice_io, task_ble, task_network
+// Core 1 : task_ui_lvgl, task_os_main
 // ============================================================
 #include "os_main.h"
-#include "../net/wifi_mgr.h"
-#include "../net/ble_manager.h"
-#include "../hal/hal_display.h"
-#include "../hal/hal_pmu.h"
-#include "../voice/voice_engine.h"
-#include "../apps/reminders/reminder_app.h"
+#include "os_kernel.h"
+#include "../hal/rtc.h"
 #include "../ui/status_bar.h"
 #include "../ui/launcher.h"
-#include <ArduinoJson.h>
-#include <Preferences.h>
-#include <Arduino.h>
-#include <WiFi.h>
-#include <time.h>
+#include "../voice/voice_engine.h"
+#include "../net/wifi_mgr.h"
+#include "../net/ble_mgr.h"
+#include <lvgl.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <freertos/semphr.h>
+#include <Arduino.h>
 
 namespace os {
 
-SemaphoreHandle_t g_lvgl_mutex = nullptr;
+// ── Handles tâches ───────────────────────────────────────────
+static TaskHandle_t _h_ui      = nullptr;
+static TaskHandle_t _h_os      = nullptr;
+static TaskHandle_t _h_voice   = nullptr;
+static TaskHandle_t _h_ble     = nullptr;
+static TaskHandle_t _h_net     = nullptr;
 
-static uint32_t _last_ntp_sync      = 0;
-static uint32_t _last_bat_tick      = 0;
-static uint32_t _last_reminder_tick = 0;
-
-// ── Callbacks BLE ─────────────────────────────────────────────
-static void _on_ble_text(const String& text) {
-    Serial.printf("[OS] BLE text → '%s'\n", text.c_str());
-    // TODO: router vers agent brain
-}
-
-static void _on_ble_agent_sync(const String& json) {
-    JsonDocument d;
-    if (deserializeJson(d, json)) return;
-    const char* cmd = d["cmd"] | "";
-    if (strcmp(cmd, "set_ble_name") == 0) {
-        Preferences p; p.begin("ble_config", false);
-        p.putString("device_name", d["value"] | "Compagnon"); p.end();
-    }
-    else if (strcmp(cmd, "set_silent") == 0) {
-        voice::voice_set_silent(d["value"] | false);
-    }
-    else if (strcmp(cmd, "get_reminders") == 0) {
-        ble::ble_notify_agent_sync(apps::reminders::reminder_to_json_all());
-    }
-    else if (strcmp(cmd, "set_reminders") == 0) {
-        apps::reminders::reminder_from_json(json);
-    }
-    else if (strcmp(cmd, "reminder_event") == 0) {
-        const char* act = d["action"] | "";
-        if (strcmp(act, "done") == 0) apps::reminders::reminder_done(d["id"] | "");
-    }
-}
-
-static void _on_ble_llm_relay(const String& json) {
-    Serial.printf("[OS] BLE LLM relay len=%u\n", json.length());
-    // TODO: injecter la réponse dans l'agent brain
-}
-
-// ── Callbacks voix ────────────────────────────────────────────
-static void _on_wake(int word_id) {
-    Serial.printf("[OS] Wake word %d\n", word_id);
-    hal::display_on();
-    voice::voice_trigger_stt();
-}
-
-static void _on_stt(const String& text) {
-    Serial.printf("[OS] STT → '%s'\n", text.c_str());
-    String t = text; t.toLowerCase();
-    if (t.indexOf("rappel") >= 0 || t.indexOf("rappelle") >= 0)
-        Serial.println("[OS] Route → app Rappels");
-    else
-        Serial.println("[OS] Route → Nestor");
-    // TODO: router vers agent brain
-}
-
-// ── Status JSON ───────────────────────────────────────────────
-static String _build_status_json() {
-    JsonDocument d;
-    d["bat_pct"]  = hal::pmu_battery_pct();
-    d["charging"] = hal::pmu_is_charging();
-    d["wifi"]     = (WiFi.status() == WL_CONNECTED);
-    d["ble"]      = ble::ble_connected();
-    d["silent"]   = voice::voice_is_silent();
-    time_t now = time(nullptr);
-    struct tm* t = localtime(&now);
-    char ts[32]; strftime(ts, sizeof(ts), "%H:%M  %d/%m/%Y", t);
-    d["time_str"] = ts;
-    String out; serializeJson(d, out); return out;
-}
-
-// ── Tache OS main (Core 1) ────────────────────────────────────
-static void _task_os_main(void*) {
-    ble::ble_init(_on_ble_text, _on_ble_agent_sync, _on_ble_llm_relay);
-    voice::voice_init(_on_wake, _on_stt);
-    voice::voice_start_task();
-    apps::reminders::app_init();
-    wifi::wifi_manager_init();
-
-    for (;;) {
-        uint32_t now_ms = millis();
-        wifi::wifi_manager_tick();
-
-        if (WiFi.status() == WL_CONNECTED &&
-            now_ms - _last_ntp_sync > 30 * 60 * 1000UL) {
-            configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org");
-            _last_ntp_sync = now_ms;
-        }
-
-        if (now_ms - _last_bat_tick > 5000) {
-            _last_bat_tick = now_ms;
-            hal::pmu_tick();
-            String st = _build_status_json();
-            if (xSemaphoreTake(g_lvgl_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-                ui::status_bar_update(st);
-                xSemaphoreGive(g_lvgl_mutex);
-            }
-            ble::ble_notify_status(st);
-        }
-
-        if (now_ms - _last_reminder_tick > 1000) {
-            _last_reminder_tick = now_ms;
-            apps::reminders::app_tick();
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-}
-
-// ── Tache LVGL (Core 1) ───────────────────────────────────────
-static void _task_ui_lvgl(void*) {
-    hal::display_init();
-    ui::launcher_init();
+// ── task_ui_lvgl — Core 1, prio 5 ────────────────────────────
+static void task_ui_lvgl(void*) {
+    // Init LVGL
+    lv_init();
     ui::status_bar_init();
+    ui::launcher_init();
+    Serial.println("[UI] LVGL ready");
     for (;;) {
-        if (xSemaphoreTake(g_lvgl_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-            lv_timer_handler();
-            xSemaphoreGive(g_lvgl_mutex);
-        }
+        lv_timer_handler();
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
+// ── task_os_main — Core 1, prio 3 ────────────────────────────
+static void task_os_main(void*) {
+    kernel_init();
+    uint32_t last_rtc_check = 0;
+    for (;;) {
+        uint32_t now = millis();
+        // Tick kernel (traite intents vocaux en attente)
+        kernel_tick();
+        // Update status bar toutes les secondes
+        if (now - last_rtc_check >= 1000) {
+            last_rtc_check = now;
+            ui::status_bar_tick();
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+// ── task_voice_io — Core 0, prio 6 ───────────────────────────
+static void task_voice_io(void*) {
+    voice::voice_engine_init();
+    Serial.println("[VOICE] task started on Core 0");
+    voice::voice_engine_run(); // boucle infinie interne
+    vTaskDelete(nullptr);
+}
+
+// ── task_ble — Core 0, prio 4 ────────────────────────────────
+static void task_ble(void*) {
+    net::ble_init();
+    Serial.println("[BLE] task started");
+    for (;;) {
+        net::ble_tick();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+// ── task_network — Core 0, prio 3 ────────────────────────────
+static void task_network(void*) {
+    net::wifi_init();
+    Serial.println("[NET] task started");
+    bool ntp_done = false;
+    for (;;) {
+        net::wifi_tick();
+        // Sync NTP → RTC dès que WiFi connecté (une seule fois par boot)
+        if (!ntp_done && net::wifi_is_connected()) {
+            time_t epoch = net::wifi_get_ntp_epoch(); // bloquant ~500ms
+            if (epoch > 0) {
+                hal::rtc_sync_from_ntp(epoch);
+                os::kernel_set_time_valid(true);
+                os::kernel_schedule_next_reminder();
+                ntp_done = true;
+                Serial.println("[NET] NTP sync done → RTC updated");
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+// ── os_start — appelé depuis setup() ─────────────────────────
 void os_start() {
-    g_lvgl_mutex = xSemaphoreCreateMutex();
-    xTaskCreatePinnedToCore(_task_ui_lvgl, "ui_lvgl",  16384, NULL, 5, NULL, 1);
-    xTaskCreatePinnedToCore(_task_os_main, "os_main",  16384, NULL, 4, NULL, 1);
+    Serial.println("[OS] Starting FreeRTOS tasks...");
+    // Core 1
+    xTaskCreatePinnedToCore(task_ui_lvgl,  "ui_lvgl",  8192, nullptr, 5, &_h_ui,    1);
+    xTaskCreatePinnedToCore(task_os_main,  "os_main",  4096, nullptr, 3, &_h_os,    1);
+    // Core 0
+    xTaskCreatePinnedToCore(task_voice_io, "voice_io", 8192, nullptr, 6, &_h_voice, 0);
+    xTaskCreatePinnedToCore(task_ble,      "ble",      6144, nullptr, 4, &_h_ble,   0);
+    xTaskCreatePinnedToCore(task_network,  "network",  6144, nullptr, 3, &_h_net,   0);
+    Serial.println("[OS] All tasks launched");
 }
 
 } // namespace os
