@@ -1,11 +1,45 @@
-# CompagnonV2 — Nestor OS unifié
+# CompagnonV2 — Compagnon OS unifié
 
-Ce repo fusionne **Compagnon v1** (PWA + firmware Waveshare AMOLED 2.16") et **Compagnon2** (firmware xiaoclaw/mimiclaw) en un **OS Nestor** unique :
+Ce repo fusionne **Compagnon** (PWA + firmware ESP32-S3) et **Compagnon2** (voice OS + agents mimiclaw) en un **OS Compagnon** consolidé et exhaustif.
 
-- OS ESP32-S3 dual-core avec FreeRTOS, LVGL launcher, barre de statut, gestion WiFi/BLE/OTA.
-- Wake word + STT/TTS + agents Nestor embarqués avec mémoire hiérarchique L0-L4.
-- Relais BLE vers la PWA Nestor (LLM relay, WiFi provisioning, sync agents, clavier, device status).
-- PWA Nestor servant d’UI riche, de hub d’agents et de cerveau cloud quand disponible.
-- Nouvelle app **Rappels** (Reminders) côté PWA + firmware.
+## Ce que c'est
 
-Voir `SPEC.md` pour la spécification complète et `ARCHITECTURE.md` pour les décisions d’architecture.
+- **Compagnon** = le projet. L'OS s'appelle Compagnon OS, la PWA s'appelle Compagnon PWA.
+- **Nestor** = une APP parmi les 8 apps du projet, pas l'OS ni la PWA.
+- Les 8 apps existent à la fois sur le device ESP32 et dans la PWA.
+
+## Les 8 apps
+
+| # | App | PWA | Firmware |
+|---|-----|-----|----------|
+| 1 | Bourse | ✅ | ✅ |
+| 2 | Météo | ✅ | ✅ |
+| 3 | Nestor | ✅ | ✅ |
+| 4 | Musique | ✅ | ✅ |
+| 5 | Radars | ✅ | ✅ |
+| 6 | SmartHome | ✅ | ✅ |
+| 7 | Ecovacs | ✅ | ✅ |
+| 8 | Rappels | ✅ (à créer) | ✅ (à créer) |
+
+## Architecture
+
+```
+CompagnonV2/
+├── README.md
+├── SPEC.md            # spécification fonctionnelle complète
+├── ARCHITECTURE.md    # découpage modules, FreeRTOS, dual-core, BLE, sync
+├── pwa/               # Compagnon PWA (responsive, standalone, config ESP32)
+└── firmware/          # Compagnon OS (ESP32-S3, FreeRTOS, LVGL, voice, agents)
+```
+
+## Points clés
+
+- **Standalone de chaque côté** : PWA tourne seule (sans ESP32), firmware tourne seul (sans téléphone).
+- **Sync bidirectionnelle** : agents, rappels, mémoire, configs se synchronisent dans les deux sens via BLE.
+- **WiFi provisioning** : toujours via la PWA (scan + saisie mdp + envoi BLE → NVS ESP32).
+- **Voice** : wake word (ESP-SR), STT/TTS Groq, bouton micro LVGL, mode silencieux global.
+- **Agent brain** : mimiclaw (Compagnon2) fusionné avec orchestrateur PWA actuel — meilleur des deux.
+- **SD card optionnelle** : cold storage si présente, mode dégradé si absente (sans blocage).
+- **PWA responsive** : cible iPhone 13, adaptée tablette/Android.
+
+Voir `SPEC.md` pour la spécification complète et `ARCHITECTURE.md` pour l'architecture détaillée.
