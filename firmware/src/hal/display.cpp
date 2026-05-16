@@ -6,7 +6,7 @@
 // ⚠️ GPIO38 partagé avec ES7210 MCLK — init display AVANT audio
 // ============================================================
 #include "display.h"
-#include "../../../include/pins.h"
+#include "../../include/pins.h"
 #include <Arduino.h>
 
 // TODO: inclure le driver CO5300 QSPI (lib Waveshare ou Arduino_GFX)
