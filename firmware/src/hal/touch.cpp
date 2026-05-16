@@ -4,7 +4,7 @@
 // TP_INT=GPIO11, TP_RST=GPIO40 (corrigé schéma)
 // ============================================================
 #include "touch.h"
-#include "../../../include/pins.h"
+#include "../../include/pins.h"
 #include <Wire.h>
 
 #define CST9220_ADDR  0x1A
