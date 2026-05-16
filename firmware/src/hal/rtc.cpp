@@ -7,7 +7,7 @@
 //   BLE SET_TIME → réécrire PCF85063 (réglage manuel / premier boot)
 // ============================================================
 #include "rtc.h"
-#include "../../../include/pins.h"
+#include "../../include/pins.h"
 #include <Wire.h>
 #include <sys/time.h>
 
