@@ -1,6 +1,15 @@
 #pragma once
+#include "app_base.h"            // Fix 3 — AppBase déclaré avant AppRappels
+#include "../storage/reminder_store.h"
 #include <time.h>
-bool   app_rappels_start();
-void   app_rappels_stop();
-void   app_rappels_intent(const char* intent, const char* param);
-time_t app_rappels_next_epoch(); // prochain rappel non déclenché
+
+class AppRappels : public AppBase {
+public:
+    void        init()     override;
+    void        update()   override;
+    void        onResume() override;
+    void        onPause()  override;
+    const char* getName()  override { return "Rappels"; }
+    void        handleIntent(const char* intent, const char* param) override;
+    time_t      nextEpoch() const;
+};

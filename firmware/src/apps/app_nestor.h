@@ -1,8 +1,12 @@
-// ============================================================
-// CompagnonV2 — apps/app_nestor.h
-// Interface app Nestor (agent IA)
-// ============================================================
 #pragma once
-bool app_nestor_start();
-void app_nestor_stop();
-void app_nestor_intent(const char* intent, const char* param);
+#include "app_base.h"   // Fix 3 — AppBase déclaré avant AppNestor
+
+class AppNestor : public AppBase {
+public:
+    void        init()     override;
+    void        update()   override;
+    void        onResume() override;
+    void        onPause()  override;
+    const char* getName()  override { return "Nestor"; }
+    void        handleIntent(const char* intent, const char* param) override;
+};

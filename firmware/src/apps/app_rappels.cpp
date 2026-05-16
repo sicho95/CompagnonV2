@@ -1,8 +1,15 @@
+// ============================================================
+// CompagnonV2 — apps/app_rappels.cpp
+// Fix 4 : #include <lvgl.h> présent en tête
+//         cast (void*)(intptr_t) — correct LVGL9 / 64-bit
+//         hal::audio::playTone supprimé → voice::speak
+// Fix 5 : #include "../voice/voice_engine.h" unifié
+// ============================================================
 #include "app_rappels.h"
 #include "../system/scheduler.h"
 #include "../storage/nvs_store.h"
-#include "../voice/voice_engine.h"
-#include <lvgl.h>
+#include "../voice/voice_engine.h"  // Fix 5 — header unifié voice::
+#include <lvgl.h>                   // Fix 4 — lv_obj_t, lv_event_t, etc.
 #include <Arduino.h>
 #include <time.h>
 
@@ -13,11 +20,12 @@ static lv_obj_t* _lbl_empty = nullptr;
 static void _rebuild_list();
 
 static void _on_delete_btn(lv_event_t* e) {
+    // Fix 4 : cast (void*)(intptr_t) → int, correct sous LVGL9
     int id = (int)(intptr_t)lv_event_get_user_data(e);
     Scheduler::cancelAlarm(id);
     ReminderStore::remove(id);
     _rebuild_list();
-    voice::speak("Rappel supprimé.");
+    voice::speak("Rappel supprimé.");  // Fix 4 : plus de hal::audio::playTone
 }
 
 static void _rebuild_list() {
@@ -32,8 +40,7 @@ static void _rebuild_list() {
     for (const auto& r : all) {
         lv_obj_t* row = lv_obj_create(_list);
         lv_obj_set_size(row, LV_PCT(100), 52);
-        // AMOLED : fond noir pur
-        lv_obj_set_style_bg_color(row, lv_color_black(), 0);
+        lv_obj_set_style_bg_color(row, lv_color_hex(0x000000), 0);
         lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
         lv_obj_set_style_border_color(row, lv_color_hex(0x1A1A1A), 0);
         lv_obj_set_style_border_width(row, 1, 0);
@@ -63,7 +70,7 @@ static void _rebuild_list() {
         lv_label_set_long_mode(lbl_text, LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_obj_set_width(lbl_text, 290);
         lv_label_set_text(lbl_text, r.label.c_str());
-        lv_obj_set_style_text_color(lbl_text, lv_color_white(), 0);
+        lv_obj_set_style_text_color(lbl_text, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_text_font(lbl_text, &lv_font_montserrat_14, 0);
 
         char timebuf[24];
@@ -76,7 +83,6 @@ static void _rebuild_list() {
         lv_obj_set_style_text_color(lbl_time, lv_color_hex(0x444444), 0);
         lv_obj_set_style_text_font(lbl_time, &lv_font_montserrat_12, 0);
 
-        // Bouton supprimer — rouge sombre AMOLED
         lv_obj_t* del_btn = lv_btn_create(row);
         lv_obj_set_size(del_btn, 36, 36);
         lv_obj_set_style_bg_color(del_btn, lv_color_hex(0x6B0000), 0);
@@ -84,7 +90,7 @@ static void _rebuild_list() {
         lv_obj_set_style_pad_all(del_btn, 4, 0);
         lv_obj_t* del_ico = lv_label_create(del_btn);
         lv_label_set_text(del_ico, LV_SYMBOL_TRASH);
-        lv_obj_set_style_text_color(del_ico, lv_color_white(), 0);
+        lv_obj_set_style_text_color(del_ico, lv_color_hex(0xFFFFFF), 0);
         lv_obj_center(del_ico);
         lv_obj_add_event_cb(del_btn, _on_delete_btn, LV_EVENT_CLICKED,
                             (void*)(intptr_t)r.id);
@@ -107,7 +113,7 @@ static time_t _parse_reminder_time(const String& text) {
     if (demain || text.indexOf("aujourd") >= 0) {
         for (int i = 0; i < (int)text.length(); i++) {
             if (isDigit(text[i])) {
-                int num = text.substring(i).toInt();
+                int num  = text.substring(i).toInt();
                 int nlen = String(num).length();
                 char after = (i + nlen < (int)text.length()) ? text[i + nlen] : ' ';
                 if (after == 'h' || after == 'H' || after == ':') {
@@ -126,13 +132,13 @@ static time_t _parse_reminder_time(const String& text) {
 
 void AppRappels::init() {
     _screen = lv_obj_create(nullptr);
-    lv_obj_set_style_bg_color(_screen, lv_color_black(), 0);  // AMOLED
+    lv_obj_set_style_bg_color(_screen, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
 
     lv_obj_t* header = lv_obj_create(_screen);
     lv_obj_set_size(header, 480, 44);
     lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 36);
-    lv_obj_set_style_bg_color(header, lv_color_black(), 0);
+    lv_obj_set_style_bg_color(header, lv_color_hex(0x000000), 0);
     lv_obj_set_style_border_width(header, 1, 0);
     lv_obj_set_style_border_side(header, LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_set_style_border_color(header, lv_color_hex(0x1A1A1A), 0);
@@ -154,7 +160,7 @@ void AppRappels::init() {
     _list = lv_obj_create(_screen);
     lv_obj_set_size(_list, 480, LV_VER_RES - 36 - 44 - 8);
     lv_obj_align(_list, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(_list, lv_color_black(), 0);  // AMOLED
+    lv_obj_set_style_bg_color(_list, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(_list, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(_list, 0, 0);
     lv_obj_set_style_pad_row(_list, 0, 0);
@@ -183,10 +189,10 @@ void AppRappels::handleIntent(const char* intent, const char* param) {
     String text(param);
     if (strcmp(intent, "create_reminder") == 0) {
         Reminder r;
-        r.label = text;
-        r.datetime = _parse_reminder_time(text);
+        r.label           = text;
+        r.datetime        = _parse_reminder_time(text);
         r.advance_minutes = 0;
-        r.enabled = true;
+        r.enabled         = true;
         if (ReminderStore::add(r)) {
             Scheduler::scheduleReminder(r);
             _rebuild_list();
