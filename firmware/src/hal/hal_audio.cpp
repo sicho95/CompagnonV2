@@ -1,131 +1,173 @@
 // ============================================================
 // CompagnonV2 — hal_audio.cpp
-// ES7210 4-mic ADC — I2S RX (TDM)
-// NS4150B ampli analogique (GPIO46 PA_EN)
-// audio_play_pcm : DAC interne ESP32-S3 via I2S TX (I2S_NUM_0)
-//   Sortie DAC : GPIO17 (L) / GPIO18 (R) — câbler sur IN+/IN- NS4150B
+//
+// Architecture audio complète :
+//   ES7210 (0x40) ADC 4-mic TDM → I2S_NUM_1 RX  (capture)
+//   ES8311 (0x18) Codec DAC     → I2S_NUM_0 TX  (TTS playback)
+//   NS4150B PA_EN=GPIO46        → ampli speaker
+//
+// I2C bus partagé : SDA=GPIO15, SCL=GPIO14
+// I2S MCLK=GPIO42, SCLK=GPIO9, LRCK=GPIO45
+//   TX DOUT=GPIO8  (ESP32→ES8311 DSDIN)
+//   RX DIN =GPIO38 (ES7210 SDOUT1→ESP32)  [à confirmer]
 // ============================================================
 #include "hal_audio.h"
 #include "../../../include/pins.h"
 #include "../../../lib/es7210/es7210.h"
+#include "../../../lib/es8311/es8311.h"
 #include <driver/i2s.h>
 #include <Wire.h>
 #include <Arduino.h>
+#include <vector>
 
 namespace hal {
 
-static bool        _initialized      = false;
-static bool        _tx_initialized   = false;
-static i2s_port_t  _i2s_rx_port      = I2S_NUM_1;
-static i2s_port_t  _i2s_tx_port      = I2S_NUM_0;  // DAC interne
+static bool       _initialized    = false;
+static bool       _tx_initialized = false;
+static bool       _rx_initialized = false;
+static i2s_port_t _i2s_rx = I2S_NUM_1;  // ES7210 mic capture
+static i2s_port_t _i2s_tx = I2S_NUM_0;  // ES8311 DAC playback
 
-// ── PA enable ────────────────────────────────────────────────
+// ── PA ───────────────────────────────────────────────────────
 static void _pa_enable(bool en) {
     digitalWrite(PIN_SPK_PA_EN, en ? HIGH : LOW);
 }
 
-// ── ES7210 I2C init ──────────────────────────────────────────
-static bool _es7210_init() {
-    Wire.begin(PIN_IIC_SDA, PIN_IIC_SCL);
-    Wire.beginTransmission(0x40);
-    if (Wire.endTransmission() != 0) {
-        Serial.println("[HAL_AUDIO] ES7210 not found on I2C 0x40");
-        return false;
-    }
-    es7210_adc_init();
-    es7210_adc_set_gain(ES7210_INPUT_MIC1, GAIN_18DB);
-    es7210_adc_set_gain(ES7210_INPUT_MIC2, GAIN_18DB);
-    es7210_adc_set_gain(ES7210_INPUT_MIC3, GAIN_18DB);
-    es7210_adc_set_gain(ES7210_INPUT_MIC4, GAIN_18DB);
-    es7210_adc_codec_enable();
-    return true;
-}
-
-// ── I2S RX (mic capture TDM) ─────────────────────────────────
-static bool _i2s_rx_init() {
-    i2s_config_t cfg = {
-        .mode                   = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-        .sample_rate            = AUDIO_SAMPLE_RATE,
-        .bits_per_sample        = I2S_BITS_PER_SAMPLE_16BIT,
-        .channel_format         = I2S_CHANNEL_FMT_ONLY_LEFT,
-        .communication_format   = I2S_COMM_FORMAT_STAND_I2S,
-        .intr_alloc_flags       = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count          = 8,
-        .dma_buf_len            = 512,
-        .use_apll               = false,
-        .tx_desc_auto_clear     = false,
-        .fixed_mclk             = 0
-    };
-    i2s_pin_config_t pins = {
-        .mck_io_num   = PIN_ES7210_MCLK,
-        .bck_io_num   = PIN_ES7210_BCLK,
-        .ws_io_num    = PIN_ES7210_LRCK,
-        .data_out_num = I2S_PIN_NO_CHANGE,
-        .data_in_num  = PIN_ES7210_DIN
-    };
-    if (i2s_driver_install(_i2s_rx_port, &cfg, 0, NULL) != ESP_OK) return false;
-    i2s_set_pin(_i2s_rx_port, &pins);
-    i2s_zero_dma_buffer(_i2s_rx_port);
-    return true;
-}
-
-// ── I2S TX (DAC interne ESP32-S3) ────────────────────────────
+// ── I2S TX → ES8311 DAC ──────────────────────────────────────
 static bool _i2s_tx_init() {
-    i2s_config_t cfg = {
-        .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN),
-        .sample_rate          = 24000,  // Groq TTS output
-        .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
-        .channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT,
-        .communication_format = I2S_COMM_FORMAT_STAND_MSB,
-        .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count        = 8,
-        .dma_buf_len          = 512,
-        .use_apll             = false,
-        .tx_desc_auto_clear   = true,
-        .fixed_mclk           = 0
-    };
-    if (i2s_driver_install(_i2s_tx_port, &cfg, 0, NULL) != ESP_OK) {
-        Serial.println("[HAL_AUDIO] I2S TX driver install failed");
+    i2s_config_t cfg = {};
+    cfg.mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
+    cfg.sample_rate          = AUDIO_TTS_RATE;
+    cfg.bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT;
+    cfg.channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT;
+    cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+    cfg.intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1;
+    cfg.dma_buf_count        = 8;
+    cfg.dma_buf_len          = 512;
+    cfg.use_apll             = false;
+    cfg.tx_desc_auto_clear   = true;
+    cfg.fixed_mclk           = 0;
+
+    if (i2s_driver_install(_i2s_tx, &cfg, 0, NULL) != ESP_OK) {
+        Serial.println("[HAL_AUDIO] I2S TX install failed");
         return false;
     }
-    // DAC interne : pas de pin config nécessaire
-    i2s_set_dac_mode(I2S_DAC_CHANNEL_LEFT_EN);  // GPIO17
+
+    i2s_pin_config_t pins = {};
+    pins.mck_io_num   = PIN_I2S_MCLK;      // GPIO42
+    pins.bck_io_num   = PIN_I2S_SCLK;      // GPIO9
+    pins.ws_io_num    = PIN_I2S_LRCK;      // GPIO45
+    pins.data_out_num = PIN_ES8311_DOUT;   // GPIO8 → ES8311 DSDIN
+    pins.data_in_num  = I2S_PIN_NO_CHANGE;
+    i2s_set_pin(_i2s_tx, &pins);
+    i2s_zero_dma_buffer(_i2s_tx);
+
     _tx_initialized = true;
-    Serial.println("[HAL_AUDIO] I2S TX DAC ready (GPIO17, 24kHz)");
+    Serial.println("[HAL_AUDIO] I2S TX ready (ES8311 DAC, 24kHz GPIO8)");
+    return true;
+}
+
+// ── I2S RX → ES7210 mic capture TDM ─────────────────────────
+static bool _i2s_rx_init() {
+    i2s_config_t cfg = {};
+    cfg.mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX);
+    cfg.sample_rate          = AUDIO_SAMPLE_RATE;
+    cfg.bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT;
+    cfg.channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT;
+    cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+    cfg.intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1;
+    cfg.dma_buf_count        = 8;
+    cfg.dma_buf_len          = 512;
+    cfg.use_apll             = false;
+    cfg.tx_desc_auto_clear   = false;
+    cfg.fixed_mclk           = 0;
+
+    if (i2s_driver_install(_i2s_rx, &cfg, 0, NULL) != ESP_OK) {
+        Serial.println("[HAL_AUDIO] I2S RX install failed");
+        return false;
+    }
+
+    i2s_pin_config_t pins = {};
+    pins.mck_io_num   = PIN_I2S_MCLK;    // GPIO42 (partagé)
+    pins.bck_io_num   = PIN_I2S_SCLK;    // GPIO9  (partagé)
+    pins.ws_io_num    = PIN_I2S_LRCK;    // GPIO45 (partagé)
+    pins.data_out_num = I2S_PIN_NO_CHANGE;
+    pins.data_in_num  = PIN_ES7210_DIN;  // GPIO38 SDOUT1 ES7210
+    i2s_set_pin(_i2s_rx, &pins);
+    i2s_zero_dma_buffer(_i2s_rx);
+
+    _rx_initialized = true;
+    Serial.println("[HAL_AUDIO] I2S RX ready (ES7210 mic TDM, 16kHz GPIO38)");
     return true;
 }
 
 // ── Public API ───────────────────────────────────────────────
 bool audio_init() {
     if (_initialized) return true;
+
     pinMode(PIN_SPK_PA_EN, OUTPUT);
     _pa_enable(false);
-    if (!_es7210_init())  return false;
-    if (!_i2s_rx_init())  return false;
-    _i2s_tx_init();  // non bloquant si échec
+
+    // I2C déjà init par PMU/Touch — Wire.begin() idempotent
+    Wire.begin(PIN_IIC_SDA, PIN_IIC_SCL);
+
+    // ES8311 Codec DAC (sortie speaker)
+    bool es8311_ok = es8311_init(AUDIO_TTS_RATE);
+    if (!es8311_ok) {
+        Serial.println("[HAL_AUDIO] ES8311 absent — playback désactivé");
+    }
+
+    // ES7210 ADC 4-mic
+    Wire.beginTransmission(ES7210_ADDR_00);
+    bool es7210_ok = (Wire.endTransmission() == 0);
+    if (es7210_ok) {
+        es7210_adc_init();
+        es7210_adc_set_gain(ES7210_INPUT_MIC1, GAIN_18DB);
+        es7210_adc_set_gain(ES7210_INPUT_MIC2, GAIN_18DB);
+        es7210_adc_set_gain(ES7210_INPUT_MIC3, GAIN_18DB);
+        es7210_adc_set_gain(ES7210_INPUT_MIC4, GAIN_18DB);
+        es7210_adc_codec_enable();
+    } else {
+        Serial.println("[HAL_AUDIO] ES7210 absent — mic désactivé");
+    }
+
+    // I2S TX (DAC playback) — init si ES8311 présent
+    if (es8311_ok) _i2s_tx_init();
+
+    // I2S RX (mic capture) — init si ES7210 présent
+    if (es7210_ok) _i2s_rx_init();
+
     _initialized = true;
-    Serial.println("[HAL_AUDIO] ready — RX TDM 16kHz + TX DAC 24kHz");
+    Serial.printf("[HAL_AUDIO] ready — ES8311:%s ES7210:%s\n",
+                  es8311_ok ? "OK" : "absent",
+                  es7210_ok ? "OK" : "absent");
     return true;
 }
 
 void audio_suspend() {
     _pa_enable(false);
-    i2s_stop(_i2s_rx_port);
-    if (_tx_initialized) i2s_stop(_i2s_tx_port);
+    if (_rx_initialized) i2s_stop(_i2s_rx);
+    if (_tx_initialized) i2s_stop(_i2s_tx);
+    es8311_set_mute(true);
 }
 
 void audio_resume() {
-    i2s_start(_i2s_rx_port);
-    if (_tx_initialized) i2s_start(_i2s_tx_port);
-    _pa_enable(true);
+    es8311_set_mute(false);
+    if (_rx_initialized) i2s_start(_i2s_rx);
+    if (_tx_initialized) i2s_start(_i2s_tx);
 }
 
 void audio_pa_enable(bool en)  { _pa_enable(en); }
 void audio_spk_enable(bool en) { _pa_enable(en); }
 
+void audio_set_volume(uint8_t vol) {
+    es8311_set_volume(vol);
+}
+
 size_t audio_mic_read(int16_t* buf, size_t samples) {
+    if (!_rx_initialized) return 0;
     size_t bytes_read = 0;
-    i2s_read(_i2s_rx_port, buf, samples * sizeof(int16_t),
+    i2s_read(_i2s_rx, buf, samples * sizeof(int16_t),
              &bytes_read, pdMS_TO_TICKS(100));
     return bytes_read / sizeof(int16_t);
 }
@@ -134,56 +176,39 @@ void audio_set_mic_gain(es7210_input_mic_t mic, es7210_gain_value_t gain) {
     es7210_adc_set_gain(mic, gain);
 }
 
-// ── audio_play_pcm — TTS Groq → DAC interne ──────────────────
-// buf : WAV brut (skip entête 44 octets) ou PCM nu 16-bit signed
-// L'ESP32-S3 DAC attend des données 16-bit UNSIGNED → décalage +32768
+// ── audio_play_pcm — TTS Groq → ES8311 → NS4150B → speaker ──
 void audio_play_pcm(const uint8_t* buf, size_t len) {
     if (!_tx_initialized) {
-        if (!_i2s_tx_init()) return;
+        Serial.println("[HAL_AUDIO] play_pcm: I2S TX non init");
+        return;
     }
     if (!buf || len == 0) return;
 
-    // Skip WAV header si présent ("RIFF")
-    const uint8_t* pcm = buf;
-    size_t pcmLen = len;
-    if (len > 44 && buf[0] == 'R' && buf[1] == 'I' && buf[2] == 'F' && buf[3] == 'F') {
+    // Skip WAV header "RIFF" 44 octets si présent
+    const uint8_t* pcm    = buf;
+    size_t         pcmLen = len;
+    if (len > 44 && buf[0]=='R' && buf[1]=='I' && buf[2]=='F' && buf[3]=='F') {
         pcm    = buf + 44;
-        pcmLen = len - 44;
+        pcmLen = len  - 44;
     }
 
-    // Convertir signed → unsigned pour le DAC interne
-    std::vector<uint8_t> dac_buf(pcmLen);
-    const int16_t* src = reinterpret_cast<const int16_t*>(pcm);
-    int16_t*       dst = reinterpret_cast<int16_t*>(dac_buf.data());
-    size_t samples = pcmLen / 2;
-    for (size_t i = 0; i < samples; i++) {
-        dst[i] = (int16_t)((int32_t)src[i] + 32768) - 32768;
-        // DAC interne ESP32 attend MSB des 8 bits haut → shifter
-        dst[i] = dst[i] >> 8;
-    }
-    // DAC repack : 16-bit word, seul les 8 bits hauts comptent
-    // Reconstruire en uint16_t avec valeur DAC dans octet haut
-    uint16_t* dacWords = reinterpret_cast<uint16_t*>(dac_buf.data());
-    for (size_t i = 0; i < samples; i++) {
-        uint16_t raw = (uint16_t)((int32_t)src[i] + 32768);
-        dacWords[i] = (raw & 0xFF00) | ((raw >> 8) & 0x00FF);
-    }
-
+    // ES8311 DAC attend du PCM 16-bit signed standard — pas de conversion nécessaire
     _pa_enable(true);
-    size_t written = 0;
-    // Écriture par blocs de 4096 octets
+    es8311_set_mute(false);
+
     size_t offset = 0;
     while (offset < pcmLen) {
-        size_t chunk = min((size_t)4096, pcmLen - offset);
-        i2s_write(_i2s_tx_port,
-                  dac_buf.data() + offset, chunk,
+        size_t chunk   = (pcmLen - offset > 4096) ? 4096 : (pcmLen - offset);
+        size_t written = 0;
+        i2s_write(_i2s_tx, pcm + offset, chunk,
                   &written, pdMS_TO_TICKS(500));
         offset += chunk;
     }
-    // Attendre la fin de la lecture
-    i2s_zero_dma_buffer(_i2s_tx_port);
-    delay(100);
+    i2s_zero_dma_buffer(_i2s_tx);
+    delay(80);
+
     _pa_enable(false);
+    es8311_set_mute(true);
 }
 
 } // namespace hal
