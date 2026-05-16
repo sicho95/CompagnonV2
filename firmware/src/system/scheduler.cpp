@@ -29,7 +29,6 @@ void scheduleReminder(const ReminderStore::Reminder& r) {
         Serial.printf("[SCHEDULER] Reminder %d already past, skip\n", r.id);
         return;
     }
-    // Remplace si existe déjà
     for (auto& a : _alarms) {
         if (a.reminder_id == r.id) { a.trigger_epoch = trigger; return; }
     }
@@ -41,17 +40,15 @@ void scheduleReminder(const ReminderStore::Reminder& r) {
 void rescheduleAll() {
     _alarms.clear();
     const auto& reminders = ReminderStore::getAll();
-    time_t best = 0;
     for (const auto& r : reminders) {
         scheduleReminder(r);
     }
-    // Trouver le prochain trigger pour l'alarme RTC
+    time_t best = 0;
     for (const auto& a : _alarms) {
         if (best == 0 || a.trigger_epoch < best) best = a.trigger_epoch;
     }
     if (best > 0) {
         hal::rtc_set_alarm(best);
-        // Programmer deep sleep timer (en µs) pour wakeup automatique
         time_t now = time(nullptr);
         uint64_t us = (uint64_t)(best - now) * 1000000ULL;
         if (us > 0) {
@@ -65,10 +62,23 @@ void rescheduleAll() {
 }
 
 void onWakeup() {
+    // FIX-ROUGE-3 : après deep sleep, _alarms est vide (RAM perdue).
+    // On recharge le store depuis FATFS et on reconstruit le vecteur
+    // AVANT de chercher quel rappel a déclenché le réveil.
+    ReminderStore::load();   // re-lit /reminders.json
+    _alarms.clear();
+    const auto& reminders = ReminderStore::getAll();
+    for (const auto& r : reminders) {
+        if (!r.enabled) continue;
+        time_t trigger = r.datetime - (time_t)(r.advance_minutes * 60);
+        _alarms.push_back({r.id, trigger});
+    }
+
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause != ESP_SLEEP_WAKEUP_TIMER && cause != ESP_SLEEP_WAKEUP_EXT0) {
         return;
     }
+
     time_t now = time(nullptr);
     // Identifier le rappel déclencheur (±10s)
     for (const auto& a : _alarms) {
@@ -77,13 +87,14 @@ void onWakeup() {
             if (!r) continue;
             Serial.printf("[SCHEDULER] Wake for reminder %d: %s\n",
                 r->id, r->label.c_str());
-            // TTS → PCM → DAC
+            // TTS → PCM → DAC (WiFi déjà init dans main.cpp avant cet appel)
             auto pcm = HttpClient::textToSpeech(r->label);
             if (!pcm.empty()) {
                 hal::audio_play_pcm(pcm.data(), pcm.size());
             }
         }
     }
+    // Replanifier le prochain rappel et reprogrammer le timer deep sleep
     rescheduleAll();
 }
 

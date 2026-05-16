@@ -7,7 +7,7 @@
 //   4. Provisioning NVS depuis secrets.h (dév uniquement)
 //   5. Display → Touch → PMU → Audio
 //   6. Apps + FreeRTOS
-// Wakeup deep sleep → Scheduler::onWakeup() avant boot UI
+// Wakeup deep sleep → wifi_init() → Scheduler::onWakeup() → re-sleep
 // ============================================================
 #include <Arduino.h>
 #include "../../include/pins.h"
@@ -22,6 +22,7 @@
 #include "system/scheduler.h"
 #include "storage/reminder_store.h"
 #include "storage/nvs_store.h"
+#include "net/wifi_mgr.h"
 #include <FFat.h>
 #include <esp_sleep.h>
 
@@ -115,12 +116,16 @@ void setup() {
     // 4. Provisioning dév (no-op en prod si NVS déjà rempli par BLE)
     _provision_from_secrets();
 
-    // Wakeup depuis deep sleep → traiter rappel AVANT init UI
+    // ── Wakeup depuis deep sleep ─────────────────────────────────────────────
+    // FIX-ORANGE-6 : WiFi DOIT être connecté avant d'appeler
+    // Scheduler::onWakeup() qui fait une requête TTS Groq.
+    // On initialise le WiFi ici (bloquant), puis on redort après TTS.
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause == ESP_SLEEP_WAKEUP_TIMER || cause == ESP_SLEEP_WAKEUP_EXT0) {
-        Serial.println("[BOOT] Wakeup from sleep → Scheduler::onWakeup()");
+        Serial.println("[BOOT] Wakeup from sleep → wifi_init + Scheduler::onWakeup()");
         hal::audio_init();
-        Scheduler::onWakeup();
+        net::wifi_init();          // connexion STA bloquante (retry × 10 × 1s)
+        Scheduler::onWakeup();     // TTS rappel → audio_play_pcm → re-sleep interne
         esp_deep_sleep_start();
     }
 
@@ -131,7 +136,8 @@ void setup() {
     hal::audio_init();
 
     // 6. Apps + FreeRTOS
-    os::apps_register_all();
+    // FIX-ROUGE-1 : apps_register_all() supprimé ici — appelé dans
+    // task_os_main (os_main.cpp) pour éviter double initialisation du registre.
     os::os_start();
 }
 

@@ -1,7 +1,7 @@
 // ============================================================
 // CompagnonV2 — VoiceEngine
 // STT : Groq Whisper via HTTP multipart/form-data
-// TTS : Groq PlayAI response_format=pcm → I2S stream
+// TTS : Groq PlayAI response_format=pcm → hal::audio_play_pcm()
 // VAD : esp-sr vad_process
 // FreeRTOS Core 0
 // ============================================================
@@ -94,7 +94,9 @@ static String _stt_groq(const int16_t* pcm, size_t samples) {
     return resp.substring(vi + 1, ve);
 }
 
-// ── TTS Groq PlayAI ──────────────────────────────────────────
+// ── TTS Groq PlayAI → hal::audio_play_pcm() ─────────────────
+// FIX-ROUGE-2 : remplacé audio_spk_write_bytes() (inexistant)
+// par accumulation dans buffer PSRAM + appel unique audio_play_pcm()
 static void _tts_speak(const char* text) {
     if (_muted) return;
     HTTPClient http; WiFiClientSecure client;
@@ -110,14 +112,24 @@ static void _tts_speak(const char* text) {
         "\"response_format\":\"pcm\"" + "}";
     int code = http.POST(body);
     if (code != 200) { http.end(); return; }
+
+    // Accumulation en PSRAM puis lecture en une passe
+    // (audio_play_pcm prend un buffer complet, pas un stream)
+    const size_t MAX_TTS_BYTES = 64 * 1024;  // 64KB ~= 2s @ 16kHz 16bit
+    uint8_t* pcm_buf = (uint8_t*)ps_malloc(MAX_TTS_BYTES);
+    if (!pcm_buf) { http.end(); return; }
+    size_t total = 0;
     WiFiClient* stream = http.getStreamPtr();
-    uint8_t buf[512];
-    while (http.connected()) {
-        int n = stream->readBytes(buf, sizeof(buf));
+    while (http.connected() && total < MAX_TTS_BYTES) {
+        int n = stream->readBytes(pcm_buf + total, MAX_TTS_BYTES - total);
         if (n <= 0) break;
-        hal::audio_spk_write_bytes(buf, n);
+        total += n;
     }
     http.end();
+    if (total > 0) {
+        hal::audio_play_pcm(pcm_buf, total);
+    }
+    free(pcm_buf);
 }
 
 // ── FreeRTOS task Core 0 ─────────────────────────────────────
@@ -167,6 +179,7 @@ static void _voice_task(void* pv) {
 void init(const Config& cfg, SttCallback cb) {
     _cfg = cfg; _stt_cb = cb;
     _tts_queue = xQueueCreate(4, sizeof(char*));
+    // FreeRTOS task interne sur Core 0 — stack 8192 (inchangée, suffisante)
     xTaskCreatePinnedToCore(_voice_task, "voice_io", 8192, nullptr, 5, &_task_handle, 0);
 }
 

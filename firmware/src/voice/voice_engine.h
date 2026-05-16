@@ -6,9 +6,11 @@
 // ============================================================
 // CompagnonV2 — VoiceEngine
 // Pipeline : VAD → STT (Groq Whisper) → callback(text)
-//          : TTS (Groq PlayAI) → hal::audio_spk_write_bytes()
+//          : TTS (Groq PlayAI) → hal::audio_play_pcm()
 // Runs on Core 0 via FreeRTOS task.
 // ============================================================
+// FIX-JAUNE-7 : commentaire corrigé — audio_spk_write_bytes() n'existe pas,
+// la lecture PCM passe par hal::audio_play_pcm() (hal_audio.h)
 
 namespace voice {
 
