@@ -17,6 +17,14 @@
 #define PIN_QSPI_D3       9
 #define PIN_LCD_RST       2
 
+// Aliases utilisés par display.cpp
+#define PIN_LCD_CS       PIN_QSPI_CS
+#define PIN_LCD_SCLK     PIN_QSPI_SCK
+#define PIN_LCD_SIO0     PIN_QSPI_D0
+#define PIN_LCD_SI1      PIN_QSPI_D1
+#define PIN_LCD_SI2      PIN_QSPI_D2
+#define PIN_LCD_SI3      PIN_QSPI_D3
+
 // ── Touch CST9220 (I2C partagé) ──────────────────────────────
 #define PIN_TP_INT        4
 #define PIN_TP_RST        2   // partagé avec LCD_RST
