@@ -43,6 +43,9 @@ static void task_ui_lvgl(void*) {
 }
 
 static void task_os_main(void*) {
+    // FIX: apps_register_all() AVANT kernel_init() — le registre doit
+    // être rempli avant que la queue d'intents soit active
+    apps_register_all();
     kernel_init();
     uint32_t last_rtc_check = 0;
     for (;;) {
@@ -57,20 +60,41 @@ static void task_os_main(void*) {
 }
 
 // ── Core 0 ───────────────────────────────────────────────────────────────────
+// FIX: voice::init() + lambda STT — voice_engine_init/run() n'existent pas
 static void task_voice_io(void*) {
-    voice::voice_engine_init();
-    Serial.println("[VOICE] task started on Core 0");
-    voice::voice_engine_run();
+    // Clé Groq dans buffer statique : le pointeur doit rester valide
+    // après le retour de cette fonction (voice::init en a besoin en continu)
+    static char s_groq_key[128];
+    String key = NvsStore::getString("app", "groq_api_key", "");
+    strncpy(s_groq_key, key.c_str(), sizeof(s_groq_key) - 1);
+    s_groq_key[sizeof(s_groq_key) - 1] = '\0';
+
+    voice::Config cfg;
+    cfg.groq_api_key = s_groq_key;
+
+    // Callback STT appelé sur Core 0 → kernel_post_intent est thread-safe
+    voice::init(cfg, [](const char* text) {
+        VoiceIntent intent;
+        intent.target_app = AppId::NESTOR;
+        strncpy(intent.intent, "free_speech", sizeof(intent.intent) - 1);
+        strncpy(intent.param,  text,          sizeof(intent.param)  - 1);
+        intent.intent[sizeof(intent.intent) - 1] = '\0';
+        intent.param [sizeof(intent.param)  - 1] = '\0';
+        kernel_post_intent(intent);
+    });
+    // voice::init() crée sa propre tâche FreeRTOS (_voice_task) sur Core 0
+    Serial.println("[VOICE] voice::init() done");
     vTaskDelete(nullptr);
 }
 
 // ── BLE callbacks ─────────────────────────────────────────────────────────────
-// on_text : texte saisi depuis la PWA → intent vocal vers Nestor
 static void _ble_on_text(const String& text) {
     VoiceIntent intent;
     intent.target_app = AppId::NESTOR;
-    strncpy(intent.intent, "text_input", sizeof(intent.intent));
-    strncpy(intent.param,  text.c_str(), sizeof(intent.param));
+    strncpy(intent.intent, "text_input", sizeof(intent.intent) - 1);
+    strncpy(intent.param,  text.c_str(), sizeof(intent.param)  - 1);
+    intent.intent[sizeof(intent.intent) - 1] = '\0';
+    intent.param [sizeof(intent.param)  - 1] = '\0';
     kernel_post_intent(intent);
 }
 
@@ -104,7 +128,6 @@ static void _ble_on_agent(const String& json) {
             NvsStore::setString("wifi", "ssid", ssid);
             NvsStore::setString("wifi", "pass", pass);
             Serial.println("[BLE] WiFi credentials updated in NVS");
-            // Reconnexion immédiate
             net::wifi_reconnect();
         }
     }
@@ -158,17 +181,26 @@ static void _ble_on_agent(const String& json) {
     }
     // ── Reminder créé depuis la PWA ───────────────────────────────────────────
     else if (strcmp(type, "reminder") == 0) {
-        Reminder r;
-        r.label           = doc["label"]   | "Rappel";
-        r.datetime        = (time_t)(long)doc["datetime"];
+        // FIX 1: namespace complet ReminderStore::Reminder
+        // FIX 2: add() retourne int (nouvel id), pas bool
+        ReminderStore::Reminder r;
+        r.label           = doc["label"].as<String>();
+        if (r.label.isEmpty()) r.label = "Rappel";
+        r.datetime        = (time_t)(long long)doc["datetime"].as<long long>();
         r.advance_minutes = doc["advance"] | 0;
-        r.enabled         = doc["enabled"] | true;
-        if (r.datetime > 0 && ReminderStore::add(r)) {
-            Scheduler::scheduleReminder(r);
-            Serial.printf("[BLE] Reminder added: %s (epoch %ld)\n",
-                          r.label.c_str(), (long)r.datetime);
+        r.enabled         = doc["enabled"].as<bool>();
+        if (r.datetime > 0) {
+            int new_id = ReminderStore::add(r);
+            if (new_id > 0) {
+                r.id = new_id;
+                Scheduler::scheduleReminder(r);
+                Serial.printf("[BLE] Reminder added id=%d: %s (epoch %ld)\n",
+                              new_id, r.label.c_str(), (long)r.datetime);
+            } else {
+                Serial.println("[BLE] ReminderStore::add() failed");
+            }
         } else {
-            Serial.println("[BLE] Reminder add failed");
+            Serial.println("[BLE] Reminder: datetime invalide (<= 0)");
         }
     }
     else {
@@ -193,6 +225,15 @@ static void task_network(void*) {
     net::wifi_init();
     Serial.println("[NET] task started");
     bool ntp_done = false;
+
+    // FIX: réinitialiser ntp_done si WiFi se déconnecte → resync RTC
+    // à la prochaine reconnexion (perte réseau, changement credentials…)
+    net::wifi_on_disconnected([&ntp_done]() {
+        ntp_done = false;
+        os::kernel_set_time_valid(false);
+        Serial.println("[NET] WiFi lost — NTP flag reset");
+    });
+
     for (;;) {
         net::wifi_tick();
         if (!ntp_done && net::wifi_is_connected()) {
@@ -214,7 +255,7 @@ void os_start() {
     Serial.println("[OS] Starting FreeRTOS tasks...");
     xTaskCreatePinnedToCore(task_ui_lvgl,  "ui_lvgl",  8192, nullptr, 5, &_h_ui,    1);
     xTaskCreatePinnedToCore(task_os_main,  "os_main",  4096, nullptr, 3, &_h_os,    1);
-    xTaskCreatePinnedToCore(task_voice_io, "voice_io", 8192, nullptr, 6, &_h_voice, 0);
+    xTaskCreatePinnedToCore(task_voice_io, "voice_io", 4096, nullptr, 6, &_h_voice, 0);
     xTaskCreatePinnedToCore(task_ble,      "ble",      6144, nullptr, 4, &_h_ble,   0);
     xTaskCreatePinnedToCore(task_network,  "network",  6144, nullptr, 3, &_h_net,   0);
     Serial.println("[OS] All tasks launched");

@@ -29,7 +29,6 @@ static QueueHandle_t _intent_queue = nullptr;
 
 void kernel_init() {
     _intent_queue = xQueueCreate(8, sizeof(VoiceIntent));
-    // Charger mode silencieux depuis NVS
     nvs_handle_t nvs;
     if (nvs_open("os_cfg", NVS_READONLY, &nvs) == ESP_OK) {
         uint8_t s = 0;
@@ -42,23 +41,21 @@ void kernel_init() {
 }
 
 void apps_register_all() {
-    // Enregistrement statique — AUCUNE allocation LVGL ici
-    _apps[(int)AppId::NESTOR]  = { AppId::NESTOR,  "Nestor",   "🤖",
+    _apps[(int)AppId::NESTOR]  = { AppId::NESTOR,  "Nestor",  "🤖",
         app_nestor_start,  app_nestor_stop,  app_nestor_intent };
-    _apps[(int)AppId::RADARS]  = { AppId::RADARS,  "Radars",   "📡",
+    _apps[(int)AppId::RADARS]  = { AppId::RADARS,  "Radars",  "📡",
         app_radars_start,  app_radars_stop,  nullptr };
-    _apps[(int)AppId::BOURSE]  = { AppId::BOURSE,  "Bourse",   "📈",
+    _apps[(int)AppId::BOURSE]  = { AppId::BOURSE,  "Bourse",  "📈",
         app_bourse_start,  app_bourse_stop,  nullptr };
-    _apps[(int)AppId::METEO]   = { AppId::METEO,   "Météo",    "🌤",
+    _apps[(int)AppId::METEO]   = { AppId::METEO,   "Météo",   "🌤",
         app_meteo_start,   app_meteo_stop,   nullptr };
-    _apps[(int)AppId::RAPPELS] = { AppId::RAPPELS, "Rappels",  "⏰",
+    _apps[(int)AppId::RAPPELS] = { AppId::RAPPELS, "Rappels", "⏰",
         app_rappels_start, app_rappels_stop, app_rappels_intent };
     Serial.println("[KERNEL] 5 apps registered");
 }
 
 bool app_launch(AppId id) {
     if (id == AppId::NONE || (int)id >= (int)AppId::COUNT) return false;
-    // Stopper l'app courante si nécessaire
     if (_current_app != AppId::NONE) {
         _apps[(int)_current_app].stop();
     }
@@ -72,7 +69,6 @@ void app_close_current() {
     if (_current_app == AppId::NONE) return;
     _apps[(int)_current_app].stop();
     _current_app = AppId::NONE;
-    // Le launcher reprend automatiquement (task_ui_lvgl)
 }
 
 AppId app_current() { return _current_app; }
@@ -90,14 +86,13 @@ void kernel_set_silent(bool s) {
         nvs_close(nvs);
     }
 }
-bool kernel_is_silent()      { return _silent; }
+bool kernel_is_silent()            { return _silent; }
 void kernel_set_time_valid(bool v) { _time_valid = v; }
-bool kernel_time_is_valid()  { return _time_valid; }
+bool kernel_time_is_valid()        { return _time_valid; }
 
 void kernel_schedule_next_reminder() {
-    // Lire prochain rappel depuis app_rappels, programmer alarme RTC
-    // + esp_sleep_enable_timer_wakeup si en light sleep
-    extern time_t app_rappels_next_epoch();
+    // FIX: supprimer 'extern' local redondant — app_rappels_next_epoch()
+    // est déjà déclarée via #include "../apps/app_rappels.h" ci-dessus
     time_t next = app_rappels_next_epoch();
     if (next > 0) {
         hal::rtc_set_alarm(next);
@@ -109,17 +104,14 @@ void kernel_schedule_next_reminder() {
 }
 
 void kernel_tick() {
-    // Traiter les intents vocaux en attente (appelé depuis task_os_main)
     VoiceIntent intent;
     while (xQueueReceive(_intent_queue, &intent, 0) == pdTRUE) {
         Serial.printf("[KERNEL] Intent: app=%d intent=%s param=%s\n",
             (int)intent.target_app, intent.intent, intent.param);
-        // Lancer l'app cible si besoin
         if (intent.target_app != AppId::NONE &&
             intent.target_app != _current_app) {
             app_launch(intent.target_app);
         }
-        // Router l'intent vers l'app
         AppId target = (intent.target_app != AppId::NONE)
             ? intent.target_app : _current_app;
         if (target != AppId::NONE && _apps[(int)target].handle_intent) {
