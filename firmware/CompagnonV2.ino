@@ -1,10 +1,10 @@
 /*
  * CompagnonV2 — ESP32-S3 Waveshare AMOLED 2.16"
  * Framework : Arduino 3.3.8 / arduino-esp32
- * LVGL      : 8.4.x
+ * LVGL      : 9.x
  * Board     : Waveshare ESP32-S3-Touch-AMOLED-2.16 (CO5300 + CST9220 + QMI8658 + AXP2101)
  *
- * Ordre d'init critique :
+ * Ordre d’init critique :
  *  1. PMU       — rails ALDO1/ALDO3, bouton power
  *  2. NVS       — namespace "compagnon"
  *  3. Display   — reset hw pin 2 (partagé touch)
@@ -19,13 +19,20 @@
  * 12. Orchestrateur
  * 13. Callback power → menu UI
  */
+
+// LVGL 9.x : renommages API
+// lv_timer_handler()       → lv_task_handler()
+// lv_display_rotation_t    → lv_display_rotation_t  (OK en LVGL9 si LV_USE_ROTATION)
+// Note : si erreur lv_display_rotation_t, activer LV_USE_ROTATION=1 dans lv_conf.h
+#include <lvgl.h>
+
 #include "src/hal/display.h"
 #include "src/hal/touch.h"
 #include "src/hal/imu.h"
 #include "src/hal/pmu.h"
 #include "src/hal/audio.h"
 #include "src/system/orchestrator.h"
-#include "src/system/wifi_mgr.h"
+#include "src/net/wifi_mgr.h"
 #include "src/system/power_mgr.h"
 #include "src/net/ota.h"
 #include "src/net/ble_mgr.h"
@@ -39,7 +46,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-// ─── Mapping noms longs PWA → clés NVS courtes (≤ 15 chars) ──────────────────
+// ── Mapping noms longs PWA → clés NVS courtes (≤ 15 chars) ──────────
 struct KeyMapping { const char *pwa_name; const char *nvs_name; };
 static const KeyMapping KEY_MAP[] = {
     { "GROQ_API_KEY",           NVS_KEY_GROQ        },
@@ -79,7 +86,7 @@ static const char *resolve_nvs_key(const char *pwa_key) {
     return nullptr;
 }
 
-// ─── Pont BLE → WiFi provisioning ────────────────────────────────────────────
+// ── Pont BLE → WiFi provisioning ────────────────────────────────
 static void ble_wifi_prov_cb(const char *json) {
     if (!json) return;
     JsonDocument doc;
@@ -96,7 +103,7 @@ static void ble_wifi_prov_cb(const char *json) {
     ble_mgr_notify_agent_sync(ack);
 }
 
-// ─── Pont BLE → Agent Sync ────────────────────────────────────────────────────
+// ── Pont BLE → Agent Sync ────────────────────────────────────
 static void ble_agent_sync_cb(const char *json) {
     if (!json) return;
     JsonDocument doc;
@@ -104,7 +111,6 @@ static void ble_agent_sync_cb(const char *json) {
     const char *cmd = doc["cmd"] | "";
     if (!cmd[0]) return;
 
-    // ── API keys ──────────────────────────────────────────────────────────────
     if (strcmp(cmd, "set_api_key") == 0) {
         const char *pwa_key = doc["key"] | "";
         const char *val     = doc["val"] | doc["value"] | "";
@@ -138,8 +144,6 @@ static void ble_agent_sync_cb(const char *json) {
                  "{\"cmd\":\"clear_api_key_ack\",\"key\":\"%s\",\"ok\":true}", pwa_key);
         ble_mgr_notify_agent_sync(ack); return;
     }
-
-    // ── WiFi ──────────────────────────────────────────────────────────────────
     if (strcmp(cmd, "wifi_list") == 0) {
         String nets = wifi_mgr_list_networks();
         char resp[512];
@@ -160,8 +164,6 @@ static void ble_agent_sync_cb(const char *json) {
         }
         return;
     }
-
-    // ── Rappels ───────────────────────────────────────────────────────────────
     if (strcmp(cmd, "set_reminders") == 0) {
         reminders_app_ble_set(json);
         ble_mgr_notify_agent_sync("{\"cmd\":\"set_reminders_ack\",\"ok\":true}");
@@ -172,8 +174,6 @@ static void ble_agent_sync_cb(const char *json) {
         reminders_app_ble_get(resp, sizeof(resp));
         ble_mgr_notify_agent_sync(resp); return;
     }
-
-    // ── Mode silencieux ───────────────────────────────────────────────────────
     if (strcmp(cmd, "set_silent") == 0) {
         bool silent = doc["value"] | false;
         nvs_set_bool("silent_mode", silent);
@@ -184,8 +184,6 @@ static void ble_agent_sync_cb(const char *json) {
                  silent ? "true" : "false");
         ble_mgr_notify_agent_sync(ack); return;
     }
-
-    // ── Device status ─────────────────────────────────────────────────────────
     if (strcmp(cmd, "battery_status") == 0 || strcmp(cmd, "get_device_status") == 0) {
         int  bat_pct  = hal_pmu_battery_pct();
         bool charging = hal_pmu_is_charging();
@@ -202,11 +200,10 @@ static void ble_agent_sync_cb(const char *json) {
                  nets.c_str());
         ble_mgr_notify_agent_sync(resp); return;
     }
-
     Serial.printf("[BLE/AGENT] cmd inconnue: %s\n", cmd);
 }
 
-// ─── Setup ────────────────────────────────────────────────────────────────────
+// ── Setup ─────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
     delay(200);
@@ -226,8 +223,8 @@ void setup() {
     ble_mgr_set_wifi_prov_cb(ble_wifi_prov_cb);
     ble_mgr_set_agent_sync_cb(ble_agent_sync_cb);
 
-    voice_engine_init();       // démarre la tâche FreeRTOS sur Core 0
-    reminders_app_init();      // charge reminders.json + programme le prochain wakeup
+    voice_engine_init();
+    reminders_app_init();
     orchestrator_init();
     ui_launcher_init();
 
@@ -236,9 +233,10 @@ void setup() {
     Serial.println("[BOOT] Pret.");
 }
 
-// ─── Loop (Core 1) ────────────────────────────────────────────────────────────
+// ── Loop (Core 1) ─────────────────────────────────────────────────
 void loop() {
-    lv_timer_handler();
+    // LVGL 9.x : lv_task_handler() remplace lv_timer_handler()
+    lv_task_handler();
     hal_pmu_tick();
     wifi_mgr_tick();
     net_ota_tick();
@@ -247,17 +245,21 @@ void loop() {
     hal_imu_tick();
 
     // Rotation auto selon orientation IMU
+    // lv_display_rotation_t disponible si LV_USE_ROTATION=1 dans lv_conf.h
     if (hal_imu_changed()) {
-        static const lv_display_rotation_t rot_map[] = {
-            LV_DISPLAY_ROTATION_270, LV_DISPLAY_ROTATION_0,
-            LV_DISPLAY_ROTATION_90,  LV_DISPLAY_ROTATION_180,
-        };
-        lv_display_set_rotation(hal_display_get(), rot_map[hal_imu_orientation()]);
+        lv_display_t* disp = hal_display_get();
+        if (disp) {
+            static const lv_display_rotation_t rot_map[] = {
+                LV_DISPLAY_ROTATION_270, LV_DISPLAY_ROTATION_0,
+                LV_DISPLAY_ROTATION_90,  LV_DISPLAY_ROTATION_180,
+            };
+            lv_display_set_rotation(disp, rot_map[hal_imu_orientation()]);
+        }
     }
 
     orchestrator_tick();
-    power_mgr_tick();          // gestion light sleep / deep sleep
-    reminders_app_tick();      // vérifie si un rappel doit sonner
+    power_mgr_tick();
+    reminders_app_tick();
     smarthome_app_tick();
     ecovacs_app_tick();
     ui_launcher_btn_tick();

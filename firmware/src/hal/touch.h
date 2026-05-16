@@ -1,6 +1,6 @@
 // ============================================================
 // CompagnonV2 — touch.h
-// CST9220 — TP_INT=GPIO11, TP_RST=GPIO40
+// CST9220 I2C
 // ============================================================
 #pragma once
 #include <stdint.h>
@@ -8,7 +8,9 @@
 namespace hal {
 
 bool touch_init();
-bool touch_read(uint16_t &x, uint16_t &y);
-bool touch_has_data();
+void touch_read(lv_indev_t* indev, lv_indev_data_t* data);
 
 } // namespace hal
+
+// ── Alias flat C ───────────────────────────────────────────────
+inline bool hal_touch_init() { return hal::touch_init(); }

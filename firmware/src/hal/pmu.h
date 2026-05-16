@@ -1,49 +1,40 @@
 #pragma once
 // =============================================================
 // CompagnonV2 — hal/pmu.h
-// Driver : AXP2101 via XPowersLib
+// Driver : AXP2101 via XPowersLib 0.3.x
 // IRQ activées : PKEY_SHORT (backlight toggle)
 //                PKEY_LONG  (poweroff complet)
 // =============================================================
 #include <Wire.h>
 #include <XPowersLib.h>
-#include "../config/pins.h"
+#include "../../include/pins.h"
 
-extern XPowersPMU pmu;
+// XPowersLib 0.3.x : la classe s'appelle XPowersAXP2101, pas XPowersPMU
+extern XPowersAXP2101 pmu;
 
-// Événements PMU remontés à task_os_main
+// Événements PMU remontés à la tâche OS
 typedef enum {
     PMU_EVT_NONE      = 0,
     PMU_EVT_PWR_SHORT,   // appui court PWR → toggle backlight
     PMU_EVT_PWR_LONG,    // appui long  PWR → arrêt complet
 } pmu_event_t;
 
-/**
- * @brief Initialise l'AXP2101.
- *        Active ADC batterie/VBUS/système.
- *        Active PKEY_SHORT_IRQ + PKEY_LONG_IRQ.
- * @return true si PMU répond.
- */
-bool pmu_init();
+// Callback long press (utilisé par le .ino)
+typedef void (*pmu_long_press_cb_t)();
 
-/**
- * @brief À appeler dans la tâche OS (polling ou depuis ISR).
- *        Lit les IRQ, remet le flag à zéro.
- * @return L'événement détecté (PMU_EVT_NONE si rien).
- */
-pmu_event_t pmu_handle_irq();
+bool         pmu_init();
+pmu_event_t  pmu_handle_irq();
+void         pmu_poweroff();
+int          pmu_battery_percent();
+bool         pmu_is_charging();
+uint16_t     pmu_battery_voltage_mv();
+void         pmu_set_long_press_cb(pmu_long_press_cb_t cb);
 
-/** @brief Éteint complètement l'appareil via AXP2101. */
-void pmu_poweroff();
-
-/** @brief Retourne le % batterie (0–100), -1 si pas de batterie. */
-int  pmu_battery_percent();
-
-/** @brief true si en charge. */
-bool pmu_is_charging();
-
-/** @brief Tension batterie en mV. */
-uint16_t pmu_battery_voltage_mv();
-
-/** @brief Flag IRQ levé depuis ISR → lu par pmu_handle_irq(). */
 extern volatile bool pmu_irq_flag;
+
+// ── Aliases flat C pour le .ino ──────────────────────────────────
+inline bool hal_pmu_init()                           { return pmu_init(); }
+inline void hal_pmu_tick()                           { pmu_handle_irq(); }
+inline int  hal_pmu_battery_pct()                    { return pmu_battery_percent(); }
+inline bool hal_pmu_is_charging()                    { return pmu_is_charging(); }
+inline void hal_pmu_set_long_press_cb(pmu_long_press_cb_t cb) { pmu_set_long_press_cb(cb); }
