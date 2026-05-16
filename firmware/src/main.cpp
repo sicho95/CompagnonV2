@@ -10,7 +10,7 @@
 // ============================================================
 #include <Arduino.h>
 #include <FFat.h>
-#include "../../include/pins.h"
+#include "../include/pins.h"
 #include "hal/rtc.h"
 #include "hal/display.h"
 #include "hal/touch.h"
