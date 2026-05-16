@@ -1,4 +1,3 @@
 #pragma once
-// Shim de compatibilité : audio.h redirige vers hal_audio.h
-// Le .ino inclut "src/hal/audio.h" — ce fichier assure la résolution.
+// shim de compatibilité — redirige vers hal_audio.h
 #include "hal_audio.h"
