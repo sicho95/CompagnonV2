@@ -1,112 +1,126 @@
 // ============================================================
 // CompagnonV2 — system/scheduler.cpp
-// Scheduler rappels : RTC alarm + deep sleep
-// TTS du label via HttpClient → hal_audio DAC
+// B3 — #include "scheduler.h" ajouté (manquait)
+// R6 — rtc_set_alarm() appelé UNE seule fois (PCF85063 = 1 alarme)
+//      avec le trigger_epoch minimum parmi tous les rappels actifs
 // ============================================================
-#include "scheduler.h"
-#include "../storage/reminder_store.h"
+#include "scheduler.h"   // B3 — manquait
 #include "../hal/rtc.h"
-#include "../hal/hal_audio.h"
 #include "../net/http_client.h"
 #include <esp_sleep.h>
-#include <Arduino.h>
-#include <vector>
+#include <esp_log.h>
+#include <algorithm>
+
+static const char* TAG = "Scheduler";
+static std::vector<ScheduledAlarm> _alarms;
+
+// Déclaration anticipée — définie dans os_kernel.cpp
+namespace os { void kernel_post_alarm(const char* label); }
+
+static ScheduledAlarm* _findAlarm(int reminder_id) {
+    for (auto& a : _alarms)
+        if (a.reminder_id == reminder_id) return &a;
+    return nullptr;
+}
+
+// R6 — met à jour l'alarme matérielle RTC avec le prochain trigger minimum
+// PCF85063 n'a qu'une seule alarme : toujours écraser avec le plus proche.
+static void _updateRtcAlarm() {
+    if (_alarms.empty()) {
+        hal::rtc_clear_alarm();
+        return;
+    }
+    time_t minEpoch = _alarms[0].trigger_epoch;
+    for (const auto& a : _alarms)
+        if (a.trigger_epoch < minEpoch) minEpoch = a.trigger_epoch;
+    hal::rtc_set_alarm(minEpoch);
+    ESP_LOGI(TAG, "RTC alarm set to epoch %lld (next of %d alarms)",
+             (long long)minEpoch, (int)_alarms.size());
+}
 
 namespace Scheduler {
 
-struct ScheduledAlarm {
-    int    reminder_id;
-    time_t trigger_epoch;
-};
-
-static std::vector<ScheduledAlarm> _alarms;
-
-void scheduleReminder(const ReminderStore::Reminder& r) {
-    if (!r.enabled) return;
+bool scheduleReminder(const Reminder& r) {
+    if (!r.enabled) return false;
+    time_t now     = time(nullptr);
     time_t trigger = r.datetime - (time_t)(r.advance_minutes * 60);
-    time_t now = time(nullptr);
     if (trigger <= now) {
-        Serial.printf("[SCHEDULER] Reminder %d already past, skip\n", r.id);
-        return;
+        ESP_LOGW(TAG, "Reminder %d trigger in the past, skipping", r.id);
+        return false;
     }
-    for (auto& a : _alarms) {
-        if (a.reminder_id == r.id) { a.trigger_epoch = trigger; return; }
-    }
-    _alarms.push_back({r.id, trigger});
-    Serial.printf("[SCHEDULER] Scheduled reminder %d at epoch %lu\n",
-        r.id, (unsigned long)trigger);
+    cancelAlarm(r.id);  // retire l'ancienne entrée si elle existe
+    ScheduledAlarm a;
+    a.reminder_id   = r.id;
+    a.trigger_epoch = trigger;
+    _alarms.push_back(a);
+    ESP_LOGI(TAG, "Queued reminder %d at epoch %lld", r.id, (long long)trigger);
+    _updateRtcAlarm(); // R6 — recalcule l'alarme min après chaque ajout
+    return true;
 }
 
 void rescheduleAll() {
     _alarms.clear();
-    const auto& reminders = ReminderStore::getAll();
-    for (const auto& r : reminders) {
-        scheduleReminder(r);
-    }
-    time_t best = 0;
-    for (const auto& a : _alarms) {
-        if (best == 0 || a.trigger_epoch < best) best = a.trigger_epoch;
-    }
-    if (best > 0) {
-        hal::rtc_set_alarm(best);
-        time_t now = time(nullptr);
-        uint64_t us = (uint64_t)(best - now) * 1000000ULL;
-        if (us > 0) {
-            esp_sleep_enable_timer_wakeup(us);
-            Serial.printf("[SCHEDULER] Sleep timer set: %llu us\n", us);
+    hal::rtc_clear_alarm();
+
+    for (const auto& r : ReminderStore::getAll()) {
+        if (!r.enabled) continue;
+        time_t now     = time(nullptr);
+        time_t trigger = r.datetime - (time_t)(r.advance_minutes * 60);
+        if (trigger > now) {
+            ScheduledAlarm a;
+            a.reminder_id   = r.id;
+            a.trigger_epoch = trigger;
+            _alarms.push_back(a);
         }
-    } else {
-        hal::rtc_clear_alarm();
-        Serial.println("[SCHEDULER] No pending reminders");
     }
+
+    _updateRtcAlarm(); // R6 — une seule écriture RTC avec le min global
+
+    // Optionnel : prépare le deep sleep timer sur le prochain trigger
+    if (!_alarms.empty()) {
+        time_t now  = time(nullptr);
+        time_t next = _alarms[0].trigger_epoch;
+        for (const auto& a : _alarms)
+            if (a.trigger_epoch < next) next = a.trigger_epoch;
+        int64_t delta = (int64_t)(next - now);
+        if (delta > 0) {
+            uint64_t sleepUs = (uint64_t)delta * 1000000ULL;
+            ESP_LOGI(TAG, "Deep sleep ready for %lld s", (long long)delta);
+            esp_sleep_enable_timer_wakeup(sleepUs);
+            // esp_deep_sleep_start(); // décommenter pour activer le deep sleep
+        }
+    }
+    ESP_LOGI(TAG, "rescheduleAll: %d active alarms", (int)_alarms.size());
 }
 
 void onWakeup() {
-    // FIX-ROUGE-3 : après deep sleep, _alarms est vide (RAM perdue).
-    // On recharge le store depuis FATFS et on reconstruit le vecteur
-    // AVANT de chercher quel rappel a déclenché le réveil.
-    ReminderStore::load();   // re-lit /reminders.json
-    _alarms.clear();
-    const auto& reminders = ReminderStore::getAll();
-    for (const auto& r : reminders) {
-        if (!r.enabled) continue;
-        time_t trigger = r.datetime - (time_t)(r.advance_minutes * 60);
-        _alarms.push_back({r.id, trigger});
-    }
-
-    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    if (cause != ESP_SLEEP_WAKEUP_TIMER && cause != ESP_SLEEP_WAKEUP_EXT0) {
-        return;
-    }
-
     time_t now = time(nullptr);
-    // Identifier le rappel déclencheur (±10s)
     for (const auto& a : _alarms) {
-        if (llabs((long long)(a.trigger_epoch - now)) <= 10) {
-            const ReminderStore::Reminder* r = ReminderStore::getById(a.reminder_id);
-            if (!r) continue;
-            Serial.printf("[SCHEDULER] Wake for reminder %d: %s\n",
-                r->id, r->label.c_str());
-            // TTS → PCM → DAC (WiFi déjà init dans main.cpp avant cet appel)
-            auto pcm = HttpClient::textToSpeech(r->label);
-            if (!pcm.empty()) {
-                hal::audio_play_pcm(pcm.data(), pcm.size());
+        if (a.trigger_epoch <= now + 5) {
+            Reminder* r = ReminderStore::getById(a.reminder_id);
+            if (r && r->enabled) {
+                ESP_LOGI(TAG, "Wakeup: reminder %d (%s)", r->id, r->label.c_str());
+                os::kernel_post_alarm(r->label.c_str());
             }
         }
     }
-    // Replanifier le prochain rappel et reprogrammer le timer deep sleep
-    rescheduleAll();
 }
 
 void cancelAlarm(int reminder_id) {
-    for (auto it = _alarms.begin(); it != _alarms.end(); ++it) {
-        if (it->reminder_id == reminder_id) {
-            _alarms.erase(it);
-            Serial.printf("[SCHEDULER] Cancelled alarm for reminder %d\n", reminder_id);
-            rescheduleAll();
-            return;
-        }
+    auto it = std::remove_if(_alarms.begin(), _alarms.end(),
+                             [reminder_id](const ScheduledAlarm& a) {
+                                 return a.reminder_id == reminder_id;
+                             });
+    bool removed = (it != _alarms.end());
+    if (removed) {
+        _alarms.erase(it, _alarms.end());
+        ESP_LOGI(TAG, "Cancelled alarm for reminder %d", reminder_id);
+        _updateRtcAlarm(); // R6 — recalcule le min après suppression
     }
+}
+
+const std::vector<ScheduledAlarm>& getScheduled() {
+    return _alarms;
 }
 
 } // namespace Scheduler

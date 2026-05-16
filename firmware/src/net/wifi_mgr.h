@@ -1,20 +1,22 @@
+#pragma once
+#include <Arduino.h>
+#include <functional>
+
 // ============================================================
 // CompagnonV2 — net/wifi_mgr.h
+// Namespace WifiMgr — API publique
 // ============================================================
-#pragma once
-#include <functional>
-#include <Arduino.h>
 
-namespace net {
+using WifiConnectedCb    = std::function<void()>;
+using WifiDisconnectedCb = std::function<void()>;
 
-void   wifi_init();
-void   wifi_tick();
-bool   wifi_is_connected();
-bool   wifi_is_ap_mode();
-time_t wifi_get_ntp_epoch();   // bloquant ~500ms, retourne 0 si échec
-void   wifi_reconnect();       // force reconnexion STA (relit NVS)
-
-void wifi_on_connected   (std::function<void()> cb);
-void wifi_on_disconnected(std::function<void()> cb);
-
-} // namespace net
+namespace WifiMgr {
+    void setCallbacks(WifiConnectedCb onConnected, WifiDisconnectedCb onDisconnected);
+    bool connect();
+    void reconnect();
+    bool isConnected();
+    void tick();                // appeler depuis task_network toutes les ~5s
+    void startAP();
+    void saveCredentials(const String& ssid, const String& pass);
+    time_t syncNtp();           // configTime + setenv(TZ) + retourne epoch UTC
+}

@@ -6,11 +6,9 @@
 // ============================================================
 // CompagnonV2 — VoiceEngine
 // Pipeline : VAD → STT (Groq Whisper) → callback(text)
-//          : TTS (Groq PlayAI) → hal::audio_play_pcm()
+//          : TTS (Groq PlayAI) → hal::audio_spk_write_bytes()
 // Runs on Core 0 via FreeRTOS task.
 // ============================================================
-// FIX-JAUNE-7 : commentaire corrigé — audio_spk_write_bytes() n'existe pas,
-// la lecture PCM passe par hal::audio_play_pcm() (hal_audio.h)
 
 namespace voice {
 
@@ -21,7 +19,7 @@ using SttCallback = std::function<void(const char* text)>;
 // ── Config ──────────────────────────────────────────────────
 struct Config {
     const char* groq_api_key    = nullptr;  // from NVS
-    const char* stt_model       = "whisper-large-v3";
+    const char* stt_model       = "whisper-large-v3-turbo"; // W1 — défaut corrigé
     const char* tts_model       = "playai-tts";
     const char* tts_voice       = "Fritz-PlayAI";   // FR-friendly
     uint32_t    vad_silence_ms  = 1200;   // end-of-speech timeout

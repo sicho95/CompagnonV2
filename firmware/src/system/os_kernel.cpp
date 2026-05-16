@@ -1,5 +1,7 @@
 // ============================================================
 // CompagnonV2 — system/os_kernel.cpp
+// B5  — static String _api_key pour éviter dangling pointer
+// R4  — fix iterator invalidation dans kernel_tick()
 // ============================================================
 #include "os_kernel.h"
 #include "../hal/rtc.h"
@@ -10,68 +12,127 @@
 #include "../apps/app_bourse.h"
 #include "../apps/app_meteo.h"
 #include "../apps/app_rappels.h"
+#include "../storage/reminder_store.h"
+#include "../storage/nvs_store.h"
+#include "../system/scheduler.h"
+#include "../ui/notification_mgr.h"
+#include "../voice/voice_engine.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
-#include <nvs_flash.h>
-#include <nvs.h>
 #include <Arduino.h>
 
 namespace os {
 
-// ── Registre apps ────────────────────────────────────────────
-static AppDesc _apps[(int)AppId::COUNT];
-static AppId   _current_app = AppId::NONE;
-static bool    _silent      = false;
-static bool    _time_valid  = false;
+static AppNestor  _app_nestor;
+static AppRadars  _app_radars;
+static AppBourse  _app_bourse;
+static AppMeteo   _app_meteo;
+static AppRappels _app_rappels;
 
-// ── Queue intents vocaux (depuis task_voice_io Core 0) ───────
+static AppDesc   _apps[(int)AppId::COUNT];
+static AppId     _current_app = AppId::NONE;
+static bool      _silent      = false;
+static bool      _time_valid  = false;
+static bool      _initialized[(int)AppId::COUNT] = {};
+
 static QueueHandle_t _intent_queue = nullptr;
 
+struct PendingAlarm { char label[96]; };
+static QueueHandle_t _alarm_queue = nullptr;
+
+static constexpr const char* NVS_NS     = "os_cfg";
+static constexpr const char* NVS_SILENT = "silent";
+
+// ── Init ─────────────────────────────────────────────────────
 void kernel_init() {
     _intent_queue = xQueueCreate(8, sizeof(VoiceIntent));
-    nvs_handle_t nvs;
-    if (nvs_open("os_cfg", NVS_READONLY, &nvs) == ESP_OK) {
-        uint8_t s = 0;
-        nvs_get_u8(nvs, "silent", &s);
-        _silent = (s == 1);
-        nvs_close(nvs);
-    }
-    _time_valid = hal::rtc_is_valid();
-    Serial.printf("[KERNEL] init — silent=%d time_valid=%d\n", _silent, _time_valid);
+    _alarm_queue  = xQueueCreate(4, sizeof(PendingAlarm));
+    _silent       = NvsStore::getBool(NVS_NS, NVS_SILENT, false);
+    _time_valid   = hal::rtc_is_valid();
+
+    // B5 — static pour garantir la durée de vie du pointeur
+    static String _api_key = NvsStore::getString("app", "groq_api_key", "");
+
+    voice::Config vcfg;
+    vcfg.groq_api_key   = _api_key.c_str(); // durée de vie garantie (static)
+    vcfg.stt_model      = "whisper-large-v3-turbo";
+    vcfg.tts_model      = "playai-tts";
+    vcfg.tts_voice      = "Fritz-PlayAI";
+    vcfg.vad_silence_ms = 1200;
+    vcfg.max_record_ms  = 10000;
+
+    voice::init(vcfg, [](const char* text) {
+        Serial.printf("[KERNEL] STT: %s\n", text);
+        VoiceIntent vi {};
+        String t = String(text);
+        t.toLowerCase();
+
+        if (t.indexOf("rappel") >= 0 || t.indexOf("réveille") >= 0
+            || t.indexOf("alarm") >= 0) {
+            vi.target_app = AppId::RAPPELS;
+            strncpy(vi.intent, "create_reminder", sizeof(vi.intent) - 1);
+        } else if (t.indexOf("nestor") >= 0 || t.indexOf("agent") >= 0) {
+            vi.target_app = AppId::NESTOR;
+            strncpy(vi.intent, "query", sizeof(vi.intent) - 1);
+        } else if (t.indexOf("bourse") >= 0 || t.indexOf("action") >= 0
+                   || t.indexOf("portfolio") >= 0) {
+            vi.target_app = AppId::BOURSE;
+            strncpy(vi.intent, "show", sizeof(vi.intent) - 1);
+        } else if (t.indexOf("météo") >= 0 || t.indexOf("meteo") >= 0
+                   || t.indexOf("température") >= 0) {
+            vi.target_app = AppId::METEO;
+            strncpy(vi.intent, "show", sizeof(vi.intent) - 1);
+        } else {
+            vi.target_app = AppId::NONE;
+            strncpy(vi.intent, "free_speech", sizeof(vi.intent) - 1);
+        }
+        strncpy(vi.param, text, sizeof(vi.param) - 1);
+        kernel_post_intent(vi);
+    });
+
+    Serial.printf("[KERNEL] init — silent=%d time_valid=%d\n",
+                  _silent, _time_valid);
 }
 
+// ── Register apps ───────────────────────────────────────────
 void apps_register_all() {
-    _apps[(int)AppId::NESTOR]  = { AppId::NESTOR,  "Nestor",  "🤖",
-        app_nestor_start,  app_nestor_stop,  app_nestor_intent };
-    _apps[(int)AppId::RADARS]  = { AppId::RADARS,  "Radars",  "📡",
-        app_radars_start,  app_radars_stop,  nullptr };
-    _apps[(int)AppId::BOURSE]  = { AppId::BOURSE,  "Bourse",  "📈",
-        app_bourse_start,  app_bourse_stop,  nullptr };
-    _apps[(int)AppId::METEO]   = { AppId::METEO,   "Météo",   "🌤",
-        app_meteo_start,   app_meteo_stop,   nullptr };
-    _apps[(int)AppId::RAPPELS] = { AppId::RAPPELS, "Rappels", "⏰",
-        app_rappels_start, app_rappels_stop, app_rappels_intent };
+    _apps[(int)AppId::NESTOR]  = { AppId::NESTOR,  "🤖", &_app_nestor,
+        [](const char* i, const char* p){ _app_nestor.handleIntent(i, p); } };
+    _apps[(int)AppId::RADARS]  = { AppId::RADARS,  "📡", &_app_radars,  nullptr };
+    _apps[(int)AppId::BOURSE]  = { AppId::BOURSE,  "📈", &_app_bourse,  nullptr };
+    _apps[(int)AppId::METEO]   = { AppId::METEO,   "🌤", &_app_meteo,   nullptr };
+    _apps[(int)AppId::RAPPELS] = { AppId::RAPPELS, "⏰", &_app_rappels,
+        [](const char* i, const char* p){ _app_rappels.handleIntent(i, p); } };
     Serial.println("[KERNEL] 5 apps registered");
 }
 
+// ── App lifecycle ────────────────────────────────────────────
 bool app_launch(AppId id) {
     if (id == AppId::NONE || (int)id >= (int)AppId::COUNT) return false;
-    if (_current_app != AppId::NONE) {
-        _apps[(int)_current_app].stop();
+    AppDesc& desc = _apps[(int)id];
+    if (!desc.instance) return false;
+    if (_current_app != AppId::NONE && _apps[(int)_current_app].instance)
+        _apps[(int)_current_app].instance->onPause();
+    if (!_initialized[(int)id]) {
+        desc.instance->init();
+        _initialized[(int)id] = true;
     }
     _current_app = id;
-    bool ok = _apps[(int)id].start();
-    if (!ok) { _current_app = AppId::NONE; }
-    return ok;
+    desc.instance->onResume();
+    return true;
 }
 
 void app_close_current() {
     if (_current_app == AppId::NONE) return;
-    _apps[(int)_current_app].stop();
+    _apps[(int)_current_app].instance->onPause();
     _current_app = AppId::NONE;
 }
 
-AppId app_current() { return _current_app; }
+AppId    app_current()              { return _current_app; }
+AppBase* app_get_instance(AppId id) {
+    if ((int)id >= (int)AppId::COUNT) return nullptr;
+    return _apps[(int)id].instance;
+}
 
 void kernel_post_intent(const VoiceIntent& intent) {
     if (_intent_queue) xQueueSend(_intent_queue, &intent, 0);
@@ -79,44 +140,91 @@ void kernel_post_intent(const VoiceIntent& intent) {
 
 void kernel_set_silent(bool s) {
     _silent = s;
-    nvs_handle_t nvs;
-    if (nvs_open("os_cfg", NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, "silent", s ? 1 : 0);
-        nvs_commit(nvs);
-        nvs_close(nvs);
-    }
+    NvsStore::setBool(NVS_NS, NVS_SILENT, s);
+    voice::set_mute(s);
 }
 bool kernel_is_silent()            { return _silent; }
-void kernel_set_time_valid(bool v) { _time_valid = v; }
-bool kernel_time_is_valid()        { return _time_valid; }
+void kernel_set_time_valid(bool v)  { _time_valid = v; }
+bool kernel_time_is_valid()         { return _time_valid; }
 
 void kernel_schedule_next_reminder() {
-    // FIX: supprimer 'extern' local redondant — app_rappels_next_epoch()
-    // est déjà déclarée via #include "../apps/app_rappels.h" ci-dessus
-    time_t next = app_rappels_next_epoch();
+    time_t next = _app_rappels.nextEpoch();
     if (next > 0) {
         hal::rtc_set_alarm(next);
-        Serial.printf("[KERNEL] Next reminder scheduled at epoch %lu\n",
-            (unsigned long)next);
+        Serial.printf("[KERNEL] Next reminder alarm at epoch %lu\n",
+                      (unsigned long)next);
     } else {
         hal::rtc_clear_alarm();
     }
 }
 
+void kernel_post_alarm(const char* label) {
+    if (!_alarm_queue) return;
+    PendingAlarm a;
+    strncpy(a.label, label, sizeof(a.label) - 1);
+    a.label[sizeof(a.label) - 1] = '\0';
+    xQueueSend(_alarm_queue, &a, 0);
+}
+
+// ── kernel_tick() — Core 1, 20ms ─────────────────────────────
 void kernel_tick() {
+    // 1. update() app active
+    if (_current_app != AppId::NONE && _apps[(int)_current_app].instance)
+        _apps[(int)_current_app].instance->update();
+
+    // 2. Overlay notification tick
+    ui::notification_tick();
+
+    // 3. Poll alarmes planifiées (mode actif, pas deep sleep)
+    static uint32_t _last_alarm_poll = 0;
+    uint32_t now_ms = millis();
+    if (now_ms - _last_alarm_poll >= 1000) {
+        _last_alarm_poll = now_ms;
+        time_t now = time(nullptr);
+
+        // R4 — pas d'itération + modification simultanée du vecteur.
+        // On collecte l'id à annuler, puis on agit hors de la boucle.
+        int to_cancel = -1;
+        const char* fired_label = nullptr;
+        Reminder fired_copy; // copie locale pour éviter dangling ptr après cancel
+
+        for (const auto& a : Scheduler::getScheduled()) {
+            if (a.trigger_epoch > 0 && a.trigger_epoch <= now + 2) {
+                Reminder* r = ReminderStore::getById(a.reminder_id);
+                if (r && r->enabled) {
+                    fired_copy  = *r;          // copie avant cancel
+                    to_cancel   = a.reminder_id;
+                    break;
+                }
+            }
+        }
+
+        if (to_cancel >= 0) {
+            Serial.printf("[KERNEL] Alarm fired: %s\n", fired_copy.label.c_str());
+            ui::notification_post(fired_copy.label, 8000);
+            if (!_silent) voice::speak(fired_copy.label.c_str());
+            Scheduler::cancelAlarm(to_cancel);    // safe : hors de la boucle
+            kernel_schedule_next_reminder();
+        }
+    }
+
+    // 4. Alarmes deep-sleep remontées via kernel_post_alarm()
+    PendingAlarm pending;
+    while (xQueueReceive(_alarm_queue, &pending, 0) == pdTRUE) {
+        ui::notification_post(String(pending.label), 8000);
+        if (!_silent) voice::speak(pending.label);
+    }
+
+    // 5. Intents vocaux
     VoiceIntent intent;
     while (xQueueReceive(_intent_queue, &intent, 0) == pdTRUE) {
-        Serial.printf("[KERNEL] Intent: app=%d intent=%s param=%s\n",
-            (int)intent.target_app, intent.intent, intent.param);
         if (intent.target_app != AppId::NONE &&
-            intent.target_app != _current_app) {
+            intent.target_app != _current_app)
             app_launch(intent.target_app);
-        }
         AppId target = (intent.target_app != AppId::NONE)
-            ? intent.target_app : _current_app;
-        if (target != AppId::NONE && _apps[(int)target].handle_intent) {
+                       ? intent.target_app : _current_app;
+        if (target != AppId::NONE && _apps[(int)target].handle_intent)
             _apps[(int)target].handle_intent(intent.intent, intent.param);
-        }
     }
 }
 

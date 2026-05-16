@@ -1,37 +1,36 @@
 // ============================================================
 // CompagnonV2 — net/http_client.cpp
-// Groq API : STT (Whisper), Chat (LLaMA), TTS (PlayAI)
-// WiFiClientSecure + bundle CA Mozilla
+// Fix #2  — bundle CA via esp_crt_bundle_attach
+// Fix #7  — WiFiClientSecure static, pas de copie par valeur
+// Fix #8  — timeout global sur lecture stream TTS
+// R1      — vTaskDelay(1) au lieu de delay(1) dans boucle TTS
 // ============================================================
 #include "http_client.h"
 #include "../storage/nvs_store.h"
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <esp_crt_bundle.h>   // Fix #2
 #include <Arduino.h>
 
-// Bundle CA intégré par ESP-IDF (activé via sdkconfig)
-extern const uint8_t x509_crt_bundle_start[] asm("_binary_x509_crt_bundle_start");
-extern const uint8_t x509_crt_bundle_end[]   asm("_binary_x509_crt_bundle_end");
-
-#define GROQ_HOST         "api.groq.com"
-#define GROQ_STT_URL      "https://api.groq.com/openai/v1/audio/transcriptions"
-#define GROQ_CHAT_URL     "https://api.groq.com/openai/v1/chat/completions"
-#define GROQ_TTS_URL      "https://api.groq.com/openai/v1/audio/speech"
-#define GROQ_STT_MODEL    "whisper-large-v3-turbo"
-#define GROQ_CHAT_MODEL   "llama-3.3-70b-versatile"
-#define GROQ_TTS_MODEL    "playai-tts"
-#define GROQ_TTS_VOICE    "Fritz-PlayAI"
-#define HTTP_TIMEOUT_MS   10000
+#define GROQ_STT_URL    "https://api.groq.com/openai/v1/audio/transcriptions"
+#define GROQ_CHAT_URL   "https://api.groq.com/openai/v1/chat/completions"
+#define GROQ_TTS_URL    "https://api.groq.com/openai/v1/audio/speech"
+#define GROQ_STT_MODEL  "whisper-large-v3-turbo"
+#define GROQ_CHAT_MODEL "llama-3.3-70b-versatile"
+#define GROQ_TTS_MODEL  "playai-tts"
+#define GROQ_TTS_VOICE  "Fritz-PlayAI"
+#define HTTP_TIMEOUT_MS       10000
+#define TTS_STREAM_TIMEOUT_MS 15000
 
 namespace HttpClient {
 
-// ── Helper : client sécurisé avec bundle CA ───────────────────
-static WiFiClientSecure _mkClient() {
-    WiFiClientSecure c;
-    c.setCACertBundle(x509_crt_bundle_start,
-        x509_crt_bundle_end - x509_crt_bundle_start);
-    return c;
+// Fix #7 — client static, jamais copié
+static WiFiClientSecure _client;
+
+static void _configureClient() {
+    // Fix #2 — bundle CA Mozilla via fonction (plus extern asm[])
+    _client.setCACertBundle(esp_crt_bundle_attach);
 }
 
 static String _apiKey() {
@@ -45,48 +44,43 @@ String transcribeAudio(const uint8_t* wav, size_t len) {
         Serial.println("[HTTP] No Groq API key");
         return "";
     }
-
-    WiFiClientSecure client = _mkClient();
+    _configureClient();
     HTTPClient http;
-    http.begin(client, GROQ_STT_URL);
+    http.begin(_client, GROQ_STT_URL);
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.addHeader("Authorization", "Bearer " + key);
 
-    // Boundary multipart
     String boundary = "----CompagnonBoundary";
-    String contentType = "multipart/form-data; boundary=" + boundary;
-    http.addHeader("Content-Type", contentType);
+    http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
 
-    // Body
-    String head = "--" + boundary + "\r\n";
-    head += "Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n";
-    head += "Content-Type: audio/wav\r\n\r\n";
-    String tail = "\r\n--" + boundary + "--\r\n";
-    // model part
     String modelPart = "--" + boundary + "\r\n";
     modelPart += "Content-Disposition: form-data; name=\"model\"\r\n\r\n";
     modelPart += String(GROQ_STT_MODEL) + "\r\n";
 
-    // Assembler dans un buffer
+    String head = "--" + boundary + "\r\n";
+    head += "Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n";
+    head += "Content-Type: audio/wav\r\n\r\n";
+
+    String tail = "\r\n--" + boundary + "--\r\n";
+
     size_t totalLen = modelPart.length() + head.length() + len + tail.length();
     uint8_t* body = (uint8_t*)malloc(totalLen);
     if (!body) { http.end(); return ""; }
 
     size_t pos = 0;
     memcpy(body + pos, modelPart.c_str(), modelPart.length()); pos += modelPart.length();
-    memcpy(body + pos, head.c_str(), head.length());           pos += head.length();
-    memcpy(body + pos, wav, len);                               pos += len;
-    memcpy(body + pos, tail.c_str(), tail.length());
+    memcpy(body + pos, head.c_str(),      head.length());      pos += head.length();
+    memcpy(body + pos, wav,               len);                pos += len;
+    memcpy(body + pos, tail.c_str(),      tail.length());
 
     int code = http.POST(body, totalLen);
     free(body);
 
     if (code != 200) {
-        Serial.printf("[HTTP] STT error %d\n", code);
+        Serial.printf("[HTTP] STT error %d: %s\n", code, http.getString().c_str());
         http.end();
         return "";
     }
-
     String resp = http.getString();
     http.end();
 
@@ -100,9 +94,9 @@ String chatCompletion(const String& prompt) {
     String key = _apiKey();
     if (key.isEmpty()) return "";
 
-    WiFiClientSecure client = _mkClient();
+    _configureClient();
     HTTPClient http;
-    http.begin(client, GROQ_CHAT_URL);
+    http.begin(_client, GROQ_CHAT_URL);
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.addHeader("Authorization", "Bearer " + key);
     http.addHeader("Content-Type",  "application/json");
@@ -119,11 +113,10 @@ String chatCompletion(const String& prompt) {
 
     int code = http.POST(body);
     if (code != 200) {
-        Serial.printf("[HTTP] Chat error %d\n", code);
+        Serial.printf("[HTTP] Chat error %d: %s\n", code, http.getString().c_str());
         http.end();
         return "";
     }
-
     String resp = http.getString();
     http.end();
 
@@ -132,14 +125,14 @@ String chatCompletion(const String& prompt) {
     return doc["choices"][0]["message"]["content"] | String("");
 }
 
-// ── TTS — POST JSON → PCM binaire ────────────────────────────
+// ── TTS — POST JSON → PCM/WAV binaire ────────────────────────
 std::vector<uint8_t> textToSpeech(const String& text) {
     String key = _apiKey();
     if (key.isEmpty()) return {};
 
-    WiFiClientSecure client = _mkClient();
+    _configureClient();
     HTTPClient http;
-    http.begin(client, GROQ_TTS_URL);
+    http.begin(_client, GROQ_TTS_URL);
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.addHeader("Authorization", "Bearer " + key);
     http.addHeader("Content-Type",  "application/json");
@@ -155,27 +148,34 @@ std::vector<uint8_t> textToSpeech(const String& text) {
 
     int code = http.POST(body);
     if (code != 200) {
-        Serial.printf("[HTTP] TTS error %d\n", code);
+        Serial.printf("[HTTP] TTS error %d: %s\n", code, http.getString().c_str());
         http.end();
         return {};
     }
 
-    // Lire le corps binaire
-    int len = http.getSize();
+    // Fix #8 + R1 — lecture stream avec timeout global + vTaskDelay
+    int contentLen = http.getSize();
     std::vector<uint8_t> pcm;
-    if (len > 0) pcm.reserve(len);
+    if (contentLen > 0) pcm.reserve((size_t)contentLen);
 
     WiFiClient* stream = http.getStreamPtr();
     uint8_t buf[512];
-    while (http.connected() && (len > 0 || len == -1)) {
+    unsigned long t0 = millis();
+    int remaining = contentLen;
+
+    while (http.connected() && (remaining > 0 || contentLen == -1)) {
+        if (millis() - t0 > TTS_STREAM_TIMEOUT_MS) {
+            Serial.println("[HTTP] TTS stream timeout");
+            break;
+        }
         size_t avail = stream->available();
         if (avail) {
             size_t toRead = min(avail, sizeof(buf));
             size_t rd = stream->readBytes(buf, toRead);
             pcm.insert(pcm.end(), buf, buf + rd);
-            if (len != -1) len -= rd;
+            if (contentLen != -1) remaining -= (int)rd;
         } else {
-            delay(1);
+            vTaskDelay(pdMS_TO_TICKS(1)); // R1 — yield FreeRTOS, pas busy-wait
         }
     }
     http.end();
