@@ -2,8 +2,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-void ui_launcher_init();
-void ui_launcher_btn_tick();
+void smarthome_app_init();
+void smarthome_app_tick();
 #ifdef __cplusplus
 }
 #endif

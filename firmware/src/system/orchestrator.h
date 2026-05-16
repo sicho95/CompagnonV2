@@ -1,14 +1,15 @@
 #pragma once
 // ============================================================
-// Gestionnaire veille / deep-sleep CompagnonV2
+// Orchestrateur CompagnonV2
+// Coordonne les modules app, voice, net, reminders
 // ============================================================
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void power_mgr_init();
-void power_mgr_tick();
-void power_mgr_request_sleep();
+void orchestrator_init();
+void orchestrator_tick();
 
 #ifdef __cplusplus
 }
