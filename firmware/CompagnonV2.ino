@@ -4,7 +4,7 @@
  * LVGL      : 9.x
  * Board     : Waveshare ESP32-S3-Touch-AMOLED-2.16 (CO5300 + CST9220 + QMI8658 + AXP2101)
  *
- * Ordre d’init critique :
+ * Ordre d'init critique :
  *  1. PMU       — rails ALDO1/ALDO3, bouton power
  *  2. NVS       — namespace "compagnon"
  *  3. Display   — reset hw pin 2 (partagé touch)
@@ -20,10 +20,6 @@
  * 13. Callback power → menu UI
  */
 
-// LVGL 9.x : renommages API
-// lv_timer_handler()       → lv_task_handler()
-// lv_display_rotation_t    → lv_display_rotation_t  (OK en LVGL9 si LV_USE_ROTATION)
-// Note : si erreur lv_display_rotation_t, activer LV_USE_ROTATION=1 dans lv_conf.h
 #include <lvgl.h>
 
 #include "src/hal/display.h"
@@ -32,7 +28,7 @@
 #include "src/hal/pmu.h"
 #include "src/hal/audio.h"
 #include "src/system/orchestrator.h"
-#include "src/net/wifi_mgr.h"
+#include "src/system/wifi_mgr.h"    // wifi_mgr est dans system/, pas net/
 #include "src/system/power_mgr.h"
 #include "src/net/ota.h"
 #include "src/net/ble_mgr.h"
@@ -46,7 +42,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-// ── Mapping noms longs PWA → clés NVS courtes (≤ 15 chars) ──────────
+// ─── Mapping noms longs PWA → clés NVS courtes (≤ 15 chars) ──────────────────
 struct KeyMapping { const char *pwa_name; const char *nvs_name; };
 static const KeyMapping KEY_MAP[] = {
     { "GROQ_API_KEY",           NVS_KEY_GROQ        },
@@ -86,7 +82,7 @@ static const char *resolve_nvs_key(const char *pwa_key) {
     return nullptr;
 }
 
-// ── Pont BLE → WiFi provisioning ────────────────────────────────
+// ─── Pont BLE → WiFi provisioning ────────────────────────────────────────────
 static void ble_wifi_prov_cb(const char *json) {
     if (!json) return;
     JsonDocument doc;
@@ -103,7 +99,7 @@ static void ble_wifi_prov_cb(const char *json) {
     ble_mgr_notify_agent_sync(ack);
 }
 
-// ── Pont BLE → Agent Sync ────────────────────────────────────
+// ─── Pont BLE → Agent Sync ───────────────────────────────────────────────────
 static void ble_agent_sync_cb(const char *json) {
     if (!json) return;
     JsonDocument doc;
@@ -203,7 +199,7 @@ static void ble_agent_sync_cb(const char *json) {
     Serial.printf("[BLE/AGENT] cmd inconnue: %s\n", cmd);
 }
 
-// ── Setup ─────────────────────────────────────────────────────────
+// ─── Setup ───────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
     delay(200);
@@ -233,10 +229,9 @@ void setup() {
     Serial.println("[BOOT] Pret.");
 }
 
-// ── Loop (Core 1) ─────────────────────────────────────────────────
+// ─── Loop (Core 1) ───────────────────────────────────────────────────────────
 void loop() {
-    // LVGL 9.x : lv_task_handler() remplace lv_timer_handler()
-    lv_task_handler();
+    lv_task_handler();   // LVGL 9.x : remplace lv_timer_handler()
     hal_pmu_tick();
     wifi_mgr_tick();
     net_ota_tick();
@@ -245,7 +240,6 @@ void loop() {
     hal_imu_tick();
 
     // Rotation auto selon orientation IMU
-    // lv_display_rotation_t disponible si LV_USE_ROTATION=1 dans lv_conf.h
     if (hal_imu_changed()) {
         lv_display_t* disp = hal_display_get();
         if (disp) {
