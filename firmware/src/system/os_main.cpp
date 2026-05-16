@@ -13,9 +13,13 @@
 #include "../voice/voice_engine.h"
 #include "../net/wifi_mgr.h"
 #include "../net/ble_manager.h"
+#include "../storage/nvs_store.h"
+#include "../storage/reminder_store.h"
+#include "../system/scheduler.h"
 #include <lvgl.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <ArduinoJson.h>
 #include <Arduino.h>
 
 namespace os {
@@ -26,7 +30,7 @@ static TaskHandle_t _h_voice = nullptr;
 static TaskHandle_t _h_ble   = nullptr;
 static TaskHandle_t _h_net   = nullptr;
 
-// ── Core 1 ───────────────────────────────────────────────
+// ── Core 1 ───────────────────────────────────────────────────────────────────
 static void task_ui_lvgl(void*) {
     lv_init();
     ui::status_bar_init();
@@ -52,7 +56,7 @@ static void task_os_main(void*) {
     }
 }
 
-// ── Core 0 ───────────────────────────────────────────────
+// ── Core 0 ───────────────────────────────────────────────────────────────────
 static void task_voice_io(void*) {
     voice::voice_engine_init();
     Serial.println("[VOICE] task started on Core 0");
@@ -60,12 +64,8 @@ static void task_voice_io(void*) {
     vTaskDelete(nullptr);
 }
 
-// ── BLE : callbacks vers le kernel ───────────────────────────
-// on_text  : texte saisi depuis la PWA → intent vocal
-// on_agent : sync config/réglages depuis la PWA (JSON)
-//            • {"type":"wifi", "ssid":"...", "pass":"..."}
-//            • {"type":"groq", "key":"..."}
-// on_llm   : relay LLM (réponse stream depuis PWA)
+// ── BLE callbacks ─────────────────────────────────────────────────────────────
+// on_text : texte saisi depuis la PWA → intent vocal vers Nestor
 static void _ble_on_text(const String& text) {
     VoiceIntent intent;
     intent.target_app = AppId::NESTOR;
@@ -74,17 +74,106 @@ static void _ble_on_text(const String& text) {
     kernel_post_intent(intent);
 }
 
+// on_agent : canal de configuration/provisioning depuis la PWA
+// Formats JSON supportés :
+//   {"type":"wifi",     "ssid":"...",    "pass":"..."}
+//   {"type":"groq",     "key":"..."}
+//   {"type":"bourse",   "key":"..."}
+//   {"type":"meteo",    "key":"..."}
+//   {"type":"tuya",     "access_id":"...", "access_key":"...", "region":"eu"}
+//   {"type":"ecovacs",  "account":"...",   "password":"...",   "continent":"eu"}
+//   {"type":"reminder", "label":"...",    "datetime":1234567890,
+//                        "advance":5,      "enabled":true}
 static void _ble_on_agent(const String& json) {
-    // Parser le JSON et écrire dans NVS — c'est le canal prod pour
-    // pousser les credentials sans recompiler
-    // Format attendu de la PWA :
-    //   {"type":"wifi",  "ssid":"...", "pass":"..."}
-    //   {"type":"groq",  "key":"..."}
-    //   {"type":"reminder", "label":"...", "datetime":1234567890,
-    //                       "advance":5, "enabled":true}
     Serial.printf("[BLE] agent_sync: %s\n", json.c_str());
-    // TODO — à implanter avec ArduinoJson dans une prochaine étape
-    // pour l'instant on logue uniquement
+
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, json);
+    if (err) {
+        Serial.printf("[BLE] JSON parse error: %s\n", err.c_str());
+        return;
+    }
+
+    const char* type = doc["type"] | "";
+
+    // ── Credentials WiFi ─────────────────────────────────────────────────────
+    if (strcmp(type, "wifi") == 0) {
+        const char* ssid = doc["ssid"] | "";
+        const char* pass = doc["pass"] | "";
+        if (strlen(ssid) > 0) {
+            NvsStore::setString("wifi", "ssid", ssid);
+            NvsStore::setString("wifi", "pass", pass);
+            Serial.println("[BLE] WiFi credentials updated in NVS");
+            // Reconnexion immédiate
+            net::wifi_reconnect();
+        }
+    }
+    // ── Clé Groq ─────────────────────────────────────────────────────────────
+    else if (strcmp(type, "groq") == 0) {
+        const char* key = doc["key"] | "";
+        if (strlen(key) > 0) {
+            NvsStore::setString("app", "groq_api_key", key);
+            Serial.println("[BLE] Groq API key updated in NVS");
+        }
+    }
+    // ── Clé Twelve Data ──────────────────────────────────────────────────────
+    else if (strcmp(type, "bourse") == 0) {
+        const char* key = doc["key"] | "";
+        if (strlen(key) > 0) {
+            NvsStore::setString("bourse", "td_api_key", key);
+            Serial.println("[BLE] Twelve Data key updated in NVS");
+        }
+    }
+    // ── Clé WeatherAPI ───────────────────────────────────────────────────────
+    else if (strcmp(type, "meteo") == 0) {
+        const char* key = doc["key"] | "";
+        if (strlen(key) > 0) {
+            NvsStore::setString("meteo", "weather_api_key", key);
+            Serial.println("[BLE] WeatherAPI key updated in NVS");
+        }
+    }
+    // ── Credentials Tuya ─────────────────────────────────────────────────────
+    else if (strcmp(type, "tuya") == 0) {
+        const char* id  = doc["access_id"]  | "";
+        const char* key = doc["access_key"] | "";
+        const char* reg = doc["region"]     | "eu";
+        if (strlen(id) > 0) {
+            NvsStore::setString("tuya", "access_id",  id);
+            NvsStore::setString("tuya", "access_key", key);
+            NvsStore::setString("tuya", "region",     reg);
+            Serial.println("[BLE] Tuya credentials updated in NVS");
+        }
+    }
+    // ── Credentials Ecovacs ──────────────────────────────────────────────────
+    else if (strcmp(type, "ecovacs") == 0) {
+        const char* acc  = doc["account"]   | "";
+        const char* pass = doc["password"]  | "";
+        const char* cont = doc["continent"] | "eu";
+        if (strlen(acc) > 0) {
+            NvsStore::setString("ecovacs", "account",   acc);
+            NvsStore::setString("ecovacs", "password",  pass);
+            NvsStore::setString("ecovacs", "continent", cont);
+            Serial.println("[BLE] Ecovacs credentials updated in NVS");
+        }
+    }
+    // ── Reminder créé depuis la PWA ───────────────────────────────────────────
+    else if (strcmp(type, "reminder") == 0) {
+        Reminder r;
+        r.label           = doc["label"]   | "Rappel";
+        r.datetime        = (time_t)(long)doc["datetime"];
+        r.advance_minutes = doc["advance"] | 0;
+        r.enabled         = doc["enabled"] | true;
+        if (r.datetime > 0 && ReminderStore::add(r)) {
+            Scheduler::scheduleReminder(r);
+            Serial.printf("[BLE] Reminder added: %s (epoch %ld)\n",
+                          r.label.c_str(), (long)r.datetime);
+        } else {
+            Serial.println("[BLE] Reminder add failed");
+        }
+    }
+    else {
+        Serial.printf("[BLE] Unknown agent type: %s\n", type);
+    }
 }
 
 static void _ble_on_llm(const String& json) {
@@ -94,14 +183,12 @@ static void _ble_on_llm(const String& json) {
 static void task_ble(void*) {
     ble::ble_init(_ble_on_text, _ble_on_agent, _ble_on_llm);
     Serial.println("[BLE] task started");
-    // ble_manager tourne en interne (callbacks BLE stack)
-    // Cette tâche reste vivante pour les notify éventuels
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
-// ── Network ───────────────────────────────────────────────
+// ── Network ───────────────────────────────────────────────────────────────────
 static void task_network(void*) {
     net::wifi_init();
     Serial.println("[NET] task started");
@@ -122,7 +209,7 @@ static void task_network(void*) {
     }
 }
 
-// ── os_start ───────────────────────────────────────────────
+// ── os_start ──────────────────────────────────────────────────────────────────
 void os_start() {
     Serial.println("[OS] Starting FreeRTOS tasks...");
     xTaskCreatePinnedToCore(task_ui_lvgl,  "ui_lvgl",  8192, nullptr, 5, &_h_ui,    1);

@@ -1,19 +1,113 @@
 #include "app_nestor.h"
+#include "app_rappels.h"
 #include "../net/http_client.h"
+#include "../storage/reminder_store.h"
+#include "../system/scheduler.h"
 #include "../voice/voice_engine.h"
 #include <lvgl.h>
 #include <Arduino.h>
+#include <time.h>
 
 static lv_obj_t* _screen     = nullptr;
 static lv_obj_t* _msg_list   = nullptr;
 static lv_obj_t* _lbl_status = nullptr;
+
+// ── Mots-clés pour router l'intent localement ─────────────────────────────
+// Vérifié AVANT d'appeler Groq — évite un aller-retour réseau pour des
+// actions que le firmware peut traiter lui-même.
+static bool _is_reminder_request(const String& text) {
+    String t = text;
+    t.toLowerCase();
+    return (t.indexOf("rappelle") >= 0 ||
+            t.indexOf("rappel")   >= 0 ||
+            t.indexOf("remind")   >= 0 ||
+            t.indexOf("alarm")    >= 0 ||
+            t.indexOf("alarme")   >= 0);
+}
+
+// ── Parser la date/heure depuis le texte STT ──────────────────────────────
+// Comprend : "dans X minutes", "dans X heures",
+//            "aujourd'hui à Xh", "demain à Xh[Ym]"
+static time_t _parse_reminder_time(const String& raw) {
+    String text = raw;
+    text.toLowerCase();
+    time_t now = time(nullptr);
+    struct tm t;
+    localtime_r(&now, &t);
+
+    // "dans N minutes" / "dans N heures"
+    int idx_dans = text.indexOf("dans ");
+    if (idx_dans >= 0) {
+        int num = text.substring(idx_dans + 5).toInt();
+        if (num > 0) {
+            if (text.indexOf("heure") >= 0) return now + (time_t)(num * 3600);
+            return now + (time_t)(num * 60);
+        }
+    }
+
+    // "demain" / "aujourd'hui" + heure "Xh[Ym]"
+    bool demain = (text.indexOf("demain") >= 0);
+    if (demain || text.indexOf("aujourd") >= 0) {
+        for (int i = 0; i < (int)text.length(); i++) {
+            if (!isDigit(text[i])) continue;
+            int num = text.substring(i).toInt();
+            int nlen = (int)String(num).length();
+            char sep = (i + nlen < (int)text.length()) ? text[i + nlen] : ' ';
+            if (sep == 'h' || sep == 'H' || sep == ':') {
+                t.tm_hour = num;
+                t.tm_min  = 0;
+                t.tm_sec  = 0;
+                int j = i + nlen + 1;
+                if (j < (int)text.length() && isDigit(text[j]))
+                    t.tm_min = text.substring(j).toInt();
+                if (demain) t.tm_mday += 1;
+                time_t target = mktime(&t);
+                // Si l'heure est déjà passée aujourd'hui, reporter demain
+                if (!demain && target <= now) {
+                    t.tm_mday += 1;
+                    target = mktime(&t);
+                }
+                return target;
+            }
+        }
+    }
+
+    // Fallback : dans 1h
+    return now + 3600;
+}
+
+// ── Extraire le label du rappel (texte après "rappelle-moi de"/"que") ──────
+static String _extract_label(const String& raw) {
+    String t = raw;
+    // Retirer les préfixes communs
+    const char* prefixes[] = {
+        "rappelle-moi de ", "rappelle moi de ",
+        "rappelle-moi que ", "rappelle moi que ",
+        "rappelle-moi ", "rappelle moi ",
+        "crée un rappel pour ", "crée un rappel ",
+        nullptr
+    };
+    String tl = t;
+    tl.toLowerCase();
+    for (int i = 0; prefixes[i]; i++) {
+        int pos = tl.indexOf(prefixes[i]);
+        if (pos >= 0) {
+            t = t.substring(pos + strlen(prefixes[i]));
+            break;
+        }
+    }
+    t.trim();
+    if (t.length() == 0) t = raw;  // fallback : texte complet
+    // Capitaliser première lettre
+    if (t.length() > 0) t[0] = toupper(t[0]);
+    return t;
+}
 
 static void _add_bubble(const char* text, bool is_user) {
     if (!_msg_list) return;
     lv_obj_t* bubble = lv_obj_create(_msg_list);
     lv_obj_set_width(bubble, LV_PCT(85));
     lv_obj_set_height(bubble, LV_SIZE_CONTENT);
-    // AMOLED : bulles très sombres
     lv_obj_set_style_bg_color(bubble,
         is_user ? lv_color_hex(0x0A2A4A) : lv_color_hex(0x0F0F0F), 0);
     lv_obj_set_style_bg_opa(bubble, LV_OPA_COVER, 0);
@@ -24,7 +118,6 @@ static void _add_bubble(const char* text, bool is_user) {
         lv_obj_align(bubble, LV_ALIGN_RIGHT_MID, -4, 0);
     else
         lv_obj_align(bubble, LV_ALIGN_LEFT_MID, 4, 0);
-
     lv_obj_t* lbl = lv_label_create(bubble);
     lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(lbl, LV_PCT(100));
@@ -36,7 +129,7 @@ static void _add_bubble(const char* text, bool is_user) {
 
 void AppNestor::init() {
     _screen = lv_obj_create(nullptr);
-    lv_obj_set_style_bg_color(_screen, lv_color_black(), 0);  // AMOLED
+    lv_obj_set_style_bg_color(_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
 
     lv_obj_t* header = lv_obj_create(_screen);
@@ -64,7 +157,7 @@ void AppNestor::init() {
     _msg_list = lv_obj_create(_screen);
     lv_obj_set_size(_msg_list, 480, LV_VER_RES - 36 - 44 - 48);
     lv_obj_align(_msg_list, LV_ALIGN_TOP_MID, 0, 80);
-    lv_obj_set_style_bg_color(_msg_list, lv_color_black(), 0);  // AMOLED
+    lv_obj_set_style_bg_color(_msg_list, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(_msg_list, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(_msg_list, 0, 0);
     lv_obj_set_style_pad_row(_msg_list, 8, 0);
@@ -99,10 +192,45 @@ void AppNestor::onPause() {
 }
 
 void AppNestor::handleIntent(const char* intent, const char* param) {
+    String text(param);
+
+    // ── Intent create_reminder (routé depuis voice_engine ou kernel) ────────
+    if (strcmp(intent, "create_reminder") == 0 ||
+        (strcmp(intent, "free_speech") == 0 && _is_reminder_request(text))) {
+
+        _add_bubble(param, true);
+        if (_lbl_status) lv_label_set_text(_lbl_status, "⏰ Rappel...");
+
+        Reminder r;
+        r.label           = _extract_label(text);
+        r.datetime        = _parse_reminder_time(text);
+        r.advance_minutes = 0;
+        r.enabled         = true;
+
+        if (ReminderStore::add(r)) {
+            Scheduler::scheduleReminder(r);
+            struct tm lt;
+            localtime_r(&r.datetime, &lt);
+            char confirm[160];
+            snprintf(confirm, sizeof(confirm),
+                     "Rappel créé : %s, le %d à %02dh%02d.",
+                     r.label.c_str(), lt.tm_mday, lt.tm_hour, lt.tm_min);
+            _add_bubble(confirm, false);
+            voice::speak(confirm);
+        } else {
+            const char* err = "Je n'ai pas pu créer le rappel.";
+            _add_bubble(err, false);
+            voice::speak(err);
+        }
+        if (_lbl_status) lv_label_set_text(_lbl_status, LV_SYMBOL_AUDIO " Écoute");
+        return;
+    }
+
+    // ── Intent query / free_speech → Groq LLM ───────────────────────────────
     if (strcmp(intent, "query") == 0 || strcmp(intent, "free_speech") == 0) {
         _add_bubble(param, true);
         if (_lbl_status) lv_label_set_text(_lbl_status, "⌛ Réflexion...");
-        String reply = HttpClient::chatCompletion(String(param));
+        String reply = HttpClient::chatCompletion(text);
         if (reply.length() > 0) {
             _add_bubble(reply.c_str(), false);
             voice::speak(reply.c_str());
