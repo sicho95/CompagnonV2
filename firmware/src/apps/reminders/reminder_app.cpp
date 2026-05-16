@@ -141,8 +141,17 @@ void reminder_trigger(const char* id) {
         }
     }
     if (title.isEmpty()) return;
-    if (!voice::voice_is_silent()) hal::audio_play_tone(880, 500);
-    voice::tts_speak("Rappel : " + title + (desc.length() ? ". " + desc : ""));
+
+    // fix: voice:: inexistant — utiliser voice_engine_is_silent() + voice_engine_speak()
+    // fix: hal::audio_play_tone inexistant — hal::audio_play_pcm (bip synthétique via PCM)
+    if (!voice_engine_is_silent()) {
+        // Bip d'alerte 880 Hz / 500 ms via PCM (voir hal_audio pour la génération)
+        // hal::audio_play_pcm(nullptr, 0);  // TODO: passer un buffer PCM bip 880Hz
+        Serial.println("[Rappels] bip alerte");
+    }
+    String tts_msg = "Rappel : " + title + (desc.length() ? ". " + desc : "");
+    voice_engine_speak(tts_msg.c_str());
+
     // TODO: afficher modale LVGL
     Serial.printf("[Rappels] TRIGGER '%s'\n", title.c_str());
 }

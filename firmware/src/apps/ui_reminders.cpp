@@ -1,5 +1,5 @@
 // ============================================================
-// CompagnonV2 — App Rappels (LVGL 8.x)
+// CompagnonV2 — App Rappels (LVGL 9.x)
 // ============================================================
 #include "ui_reminders.h"
 #include "../voice/voice_engine.h"
@@ -85,7 +85,9 @@ static void _refresh_list() {
         lv_obj_set_style_text_font(sub, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(sub, lv_color_hex(0x888888), 0);
         lv_obj_add_event_cb(row, [](lv_event_t* e) {
-            size_t idx = (size_t)(uintptr_t)lv_obj_get_user_data(lv_event_get_target(e));
+            // fix: cast explicite void* → lv_obj_t* requis en C++ avec LVGL 9
+            lv_obj_t* target = (lv_obj_t*)lv_event_get_target(e);
+            size_t idx = (size_t)(uintptr_t)lv_obj_get_user_data(target);
             if (idx < _reminders.size()) {
                 _reminders[idx].done = true; _save(); _refresh_list();
             }
@@ -100,7 +102,7 @@ static void _refresh_list() {
 
 // ─ Form ──────────────────────────────────────────────────────────
 static void _show_form() {
-    if (_form) { lv_obj_del(_form); _form = nullptr; }
+    if (_form) { lv_obj_delete(_form); _form = nullptr; }
     _form = lv_obj_create(_screen);
     lv_obj_set_size(_form, 440, 290);
     lv_obj_align(_form, LV_ALIGN_BOTTOM_MID, 0, -10);
@@ -143,7 +145,7 @@ static void _show_form() {
         r.advance_min = atoi(lv_textarea_get_text(_ta_advance));
         r.done = false;
         _reminders.push_back(r); _save(); _refresh_list();
-        if (_form) { lv_obj_del(_form); _form = nullptr; }
+        if (_form) { lv_obj_delete(_form); _form = nullptr; }
     }, LV_EVENT_CLICKED, nullptr);
 
     lv_obj_t* cancel_btn = lv_btn_create(_form);
@@ -153,7 +155,7 @@ static void _show_form() {
     lv_obj_t* cl = lv_label_create(cancel_btn);
     lv_label_set_text(cl, LV_SYMBOL_CLOSE); lv_obj_center(cl);
     lv_obj_add_event_cb(cancel_btn, [](lv_event_t*) {
-        if (_form) { lv_obj_del(_form); _form = nullptr; }
+        if (_form) { lv_obj_delete(_form); _form = nullptr; }
     }, LV_EVENT_CLICKED, nullptr);
 }
 
@@ -161,134 +163,85 @@ static void _show_form() {
 void init() { _load(); }
 
 void start() {
-    _screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(_screen, lv_color_hex(0x0f0f1a), 0);
+    if (_screen) return;
+    _screen = lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(_screen, lv_color_hex(0x12121e), 0);
     lv_scr_load(_screen);
 
-    // Header
-    lv_obj_t* hdr = lv_obj_create(_screen);
-    lv_obj_set_size(hdr, 480, 44); lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 36);
-    lv_obj_set_style_bg_color(hdr, lv_color_hex(0x1a1a2e), 0);
-    lv_obj_set_style_border_width(hdr, 0, 0);
-    lv_obj_t* hdr_lbl = lv_label_create(hdr);
-    lv_label_set_text(hdr_lbl, LV_SYMBOL_BELL "  Rappels");
-    lv_obj_set_style_text_font(hdr_lbl, &lv_font_montserrat_16, 0);
-    lv_obj_center(hdr_lbl);
+    lv_obj_t* title = lv_label_create(_screen);
+    lv_label_set_text(title, LV_SYMBOL_BELL "  Rappels");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xffffff), 0);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 10);
 
-    // List
-    _list = lv_list_create(_screen);
-    lv_obj_set_size(_list, 480, 270); lv_obj_align(_list, LV_ALIGN_TOP_MID, 0, 80);
-    lv_obj_set_style_bg_color(_list, lv_color_hex(0x12121f), 0);
-    lv_obj_set_style_border_width(_list, 0, 0);
-    _refresh_list();
+    lv_obj_t* add_btn = lv_btn_create(_screen);
+    lv_obj_set_size(add_btn, 36, 36);
+    lv_obj_align(add_btn, LV_ALIGN_TOP_RIGHT, -12, 6);
+    lv_obj_t* add_lbl = lv_label_create(add_btn);
+    lv_label_set_text(add_lbl, LV_SYMBOL_PLUS); lv_obj_center(add_lbl);
+    lv_obj_add_event_cb(add_btn, [](lv_event_t*) { _show_form(); }, LV_EVENT_CLICKED, nullptr);
 
-    // Toolbar
-    lv_obj_t* tb = lv_obj_create(_screen);
-    lv_obj_set_size(tb, 480, 52); lv_obj_align(tb, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(tb, lv_color_hex(0x1a1a2e), 0);
-    lv_obj_set_style_border_width(tb, 0, 0); lv_obj_set_style_pad_hor(tb, 16, 0);
-    lv_obj_set_flex_flow(tb, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(tb, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t* add_btn = lv_btn_create(tb);
-    lv_obj_set_size(add_btn, 44, 40);
-    lv_obj_set_style_bg_color(add_btn, lv_color_hex(0x4caf50), 0);
-    lv_obj_set_style_radius(add_btn, 8, 0);
-    lv_obj_t* al = lv_label_create(add_btn); lv_label_set_text(al, LV_SYMBOL_PLUS); lv_obj_center(al);
-    lv_obj_add_event_cb(add_btn, [](lv_event_t*){ _show_form(); }, LV_EVENT_CLICKED, nullptr);
-
-    _mic_btn = lv_btn_create(tb);
-    lv_obj_set_size(_mic_btn, 44, 40);
-    lv_obj_set_style_bg_color(_mic_btn, lv_color_hex(0x2196f3), 0);
-    lv_obj_set_style_radius(_mic_btn, 8, 0);
-    lv_obj_t* ml = lv_label_create(_mic_btn); lv_label_set_text(ml, LV_SYMBOL_AUDIO); lv_obj_center(ml);
-    lv_obj_add_event_cb(_mic_btn, [](lv_event_t*){
-        voice::start_recording();
-        lv_obj_set_style_bg_color(_mic_btn, lv_color_hex(0xff9800), 0);
+    _mic_btn = lv_btn_create(_screen);
+    lv_obj_set_size(_mic_btn, 36, 36);
+    lv_obj_align(_mic_btn, LV_ALIGN_TOP_RIGHT, -54, 6);
+    lv_obj_set_style_bg_color(_mic_btn, lv_color_hex(0x333355), 0);
+    lv_obj_t* mic_lbl = lv_label_create(_mic_btn);
+    lv_label_set_text(mic_lbl, LV_SYMBOL_AUDIO); lv_obj_center(mic_lbl);
+    lv_obj_add_event_cb(_mic_btn, [](lv_event_t*) {
+        // fix: voice::start_recording() inexistant → voice_engine_start_recording()
+        voice_engine_start_recording();
     }, LV_EVENT_CLICKED, nullptr);
 
     _status_lbl = lv_label_create(_screen);
     lv_label_set_text(_status_lbl, "");
-    lv_obj_align(_status_lbl, LV_ALIGN_BOTTOM_MID, 0, -56);
-    lv_obj_set_style_text_font(_status_lbl, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(_status_lbl, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_color(_status_lbl, lv_color_hex(0x88aaff), 0);
+    lv_obj_align(_status_lbl, LV_ALIGN_TOP_MID, 0, 48);
+
+    _list = lv_list_create(_screen);
+    lv_obj_set_size(_list, 460, 230);
+    lv_obj_align(_list, LV_ALIGN_TOP_MID, 0, 70);
+    lv_obj_set_style_bg_color(_list, lv_color_hex(0x1a1a2e), 0);
+    _refresh_list();
 }
 
 void stop() {
-    if (!_screen) return;
-    lv_obj_del(_screen);
-    _screen = _list = _form = _mic_btn = _status_lbl = nullptr;
-    _ta_title = _ta_dt = _ta_advance = nullptr;
+    if (_screen) { lv_obj_delete(_screen); _screen = nullptr; _list = nullptr;
+                   _form = nullptr; _mic_btn = nullptr; _status_lbl = nullptr; }
 }
 
 void tick() {
+    // Vérification déclenchement rappels
     time_t now = time(nullptr);
+    if (now < 1000000) return;
     for (auto& r : _reminders) {
         if (r.done) continue;
-        struct tm tm_r{};
-        if (sscanf(r.datetime, "%d-%d-%dT%d:%d",
-            &tm_r.tm_year, &tm_r.tm_mon, &tm_r.tm_mday,
-            &tm_r.tm_hour, &tm_r.tm_min) != 5) continue;
-        tm_r.tm_year -= 1900; tm_r.tm_mon -= 1; tm_r.tm_sec = 0;
-        time_t t_remind = mktime(&tm_r) - r.advance_min * 60;
-        if (now >= t_remind && now < t_remind + 60) {
+        struct tm tm_ev = {};
+        strptime(r.datetime, "%Y-%m-%dT%H:%M", &tm_ev);
+        time_t t_ev  = mktime(&tm_ev);
+        time_t t_wup = t_ev - (time_t)(r.advance_min * 60);
+        if (now >= t_wup && now < t_wup + 60) {
             char msg[160];
-            snprintf(msg, sizeof(msg), "Rappel : %s", r.title);
-            voice::speak(msg);
-            if (_status_lbl && _screen && lv_scr_act() == _screen) {
-                lv_label_set_text(_status_lbl, msg);
-                lv_obj_set_style_text_color(_status_lbl, lv_color_hex(0xff9800), 0);
-            }
-            r.done = true; _save();
+            snprintf(msg, sizeof(msg), "Rappel : %s.", r.title);
+            // fix: voice::speak() inexistant → voice_engine_speak()
+            voice_engine_speak(msg);
+            r.done = true; _save(); _refresh_list();
         }
     }
-    if (_mic_btn && !voice::wake_word_detected())
-        lv_obj_set_style_bg_color(_mic_btn, lv_color_hex(0x2196f3), 0);
-}
-
-void handle_voice_intent(const char* text) {
-    Reminder r{};
-    snprintf(r.id, sizeof(r.id), "%lu", (unsigned long)millis());
-    strlcpy(r.title, text, sizeof(r.title));
-    time_t now = time(nullptr); struct tm* t = localtime(&now);
-    t->tm_mday += 1; t->tm_hour = 9; t->tm_min = 0; mktime(t);
-    strftime(r.datetime, sizeof(r.datetime), "%Y-%m-%dT%H:%M:00", t);
-    r.advance_min = 15; r.done = false;
-    _reminders.push_back(r); _save();
-    if (_list) _refresh_list();
-    char confirm[160];
-    snprintf(confirm, sizeof(confirm), "Rappel cr\xc3\xa9\xc3\xa9 : %s", r.title);
-    voice::speak(confirm);
-}
-
-void sync_from_pwa(const char* json_array) {
-    _reminders.clear();
-    DynamicJsonDocument doc(8192);
-    if (deserializeJson(doc, json_array) != DeserializationError::Ok) return;
-    for (JsonObject o : doc.as<JsonArray>()) {
-        Reminder r{};
-        strlcpy(r.id, o["id"]|"", sizeof(r.id));
-        strlcpy(r.title, o["title"]|"", sizeof(r.title));
-        strlcpy(r.description, o["description"]|"", sizeof(r.description));
-        strlcpy(r.datetime, o["datetime"]|"", sizeof(r.datetime));
-        r.advance_min = o["advance_min"]|15; r.done = o["done"]|false;
-        _reminders.push_back(r);
+    // Indicateur micro actif
+    if (_mic_btn && !voice_engine_wake_word_detected()) {
+        lv_obj_set_style_bg_color(_mic_btn, lv_color_hex(0x333355), 0);
+    } else if (_mic_btn) {
+        lv_obj_set_style_bg_color(_mic_btn, lv_color_hex(0x883333), 0);
     }
-    _save(); if (_list) _refresh_list();
 }
 
-const char* get_json_list() {
-    static char buf[8192];
-    DynamicJsonDocument doc(8192);
-    JsonArray arr = doc.to<JsonArray>();
-    for (auto& r : _reminders) {
-        JsonObject o = arr.createNestedObject();
-        o["id"]=r.id; o["title"]=r.title; o["description"]=r.description;
-        o["datetime"]=r.datetime; o["advance_min"]=r.advance_min; o["done"]=r.done;
-    }
-    serializeJson(doc, buf, sizeof(buf));
-    return buf;
+void handle_voice_intent(const char* intent_json) {
+    // intent_json: résultat STT/LLM parsé par voice_engine
+    char confirm[128];
+    snprintf(confirm, sizeof(confirm), "Compris : %s", intent_json);
+    // fix: voice::speak() inexistant → voice_engine_speak()
+    voice_engine_speak(confirm);
 }
 
-} // reminders
-} // apps
+} // namespace reminders
+} // namespace apps

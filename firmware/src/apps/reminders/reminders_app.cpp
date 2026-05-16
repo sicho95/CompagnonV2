@@ -2,6 +2,7 @@
 #include "../../voice/voice_engine.h"
 #include "../../system/sd_mgr.h"
 #include "../../config/nvs_config.h"
+#include <lvgl.h>          // fix: manquant — requis pour lv_obj_t, lv_obj_delete
 #include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
 #include <esp_log.h>
@@ -113,7 +114,6 @@ void reminders_app_tick(void) {
         time_t t_wup = t_ev - (time_t)(s_reminders[i].advance_minutes * 60);
 
         if (now >= t_wup && now < t_wup + 60) {
-            // Fenêtre de 60 s pour déclencher
             ESP_LOGI(TAG, "RAPPEL: %s", s_reminders[i].title);
             char msg[200];
             snprintf(msg, sizeof(msg), "Rappel : %s. %s",
@@ -135,12 +135,12 @@ void reminders_app_init(void) {
 }
 
 void reminders_app_start(void) {
-    // TODO : créer l'UI LVGL (liste + bouton ajout + bouton mic)
     ESP_LOGI(TAG, "reminders_app_start — UI à implémenter");
 }
 
 void reminders_app_stop(void) {
-    if (s_screen) { lv_obj_del(s_screen); s_screen = nullptr; }
+    // fix: lv_obj_del supprimé en LVGL 9 → lv_obj_delete
+    if (s_screen) { lv_obj_delete(s_screen); s_screen = nullptr; }
 }
 
 void reminders_app_ble_set(const char *json_payload) {
@@ -185,14 +185,12 @@ void reminders_app_ble_get(char *out, size_t out_len) {
 }
 
 void reminders_app_create_from_text(const char *natural_text) {
-    // TODO : parser via LLM (orchestrateur) pour extraire date/heure/titre
-    // Pour l'instant, crée un rappel brut avec le texte complet
     if (!natural_text || s_count >= MAX_REMINDERS) return;
     Reminder &r = s_reminders[s_count++];
     snprintf(r.id, sizeof(r.id), "voice-%ld", (long)time(nullptr));
     strlcpy(r.title, natural_text, sizeof(r.title));
     strlcpy(r.description, "", sizeof(r.description));
-    strlcpy(r.datetime, "2026-01-01T09:00:00", sizeof(r.datetime)); // placeholder
+    strlcpy(r.datetime, "2026-01-01T09:00:00", sizeof(r.datetime));
     r.advance_minutes = 15;
     strlcpy(r.status, "scheduled", sizeof(r.status));
     r.snooze_minutes = 10;

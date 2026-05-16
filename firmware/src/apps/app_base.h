@@ -12,5 +12,11 @@ public:
     virtual void        onResume() = 0;  // app passe au premier plan
     virtual void        onPause()  = 0;  // app passe en arrière-plan
     virtual const char* getName()  = 0;  // nom affiché dans le launcher
+
+    // Optionnel : dispatch d'une intention vocale/BLE vers l'app active.
+    // Implémentation vide par défaut — les apps qui n'en ont pas besoin
+    // n'ont PAS à surcharger cette méthode.
+    virtual void handleIntent(const char* /*intent*/, const char* /*param*/) {}
+
     virtual ~AppBase() = default;
 };
