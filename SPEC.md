@@ -1,6 +1,6 @@
 # CompagnonV2 — Spécification fonctionnelle complète
 
-> Version v2.5 — mai 2026  
+> Version v2.6 — mai 2026  
 > Fusion de Compagnon (PWA + firmware) et Compagnon2 (voice OS + agents mimiclaw)
 
 ---
@@ -242,16 +242,27 @@ Sources de réveil :
 ### 6.1 Safe area (boîtier arrondi)
 
 ```
-Ecran physique : 466 × 466 px (CO5300)
-Référence LVGL : 480 × 480 px virtuel
-BORDER_H = 20 px  (gauche ET droite)
-BORDER_V = 10 px  (haut ET bas)
-Zone logique : x=20, y=10, w=440, h=460 px
-Status bar   : x=20, y=10, w=440, h=36 px
-Zone apps    : x=20, y=46, w=440, h=424 px
+Ecran physique CO5300 : 480 × 480 px
+                        ↑ résolution réelle — le boîtier masque les bords
+
+Marges boîtier :
+  BORDER_H = 20 px  (marge gauche ET droite — chacune)
+  BORDER_V = 10 px  (marge haut ET bas — chacune)
+
+Zone affichable (safe area) :
+  Origine : x = BORDER_H = 20,  y = BORDER_V = 10
+  Taille  : w = 480 - 2×20 = 440 px,  h = 480 - 2×10 = 460 px
+
+Status bar (en haut de la safe area) :
+  x=20, y=10, w=440, h=36 px
+
+Zone apps (sous la status bar, dans la safe area) :
+  x=20, y=46, w=440, h=424 px  (460 - 36)
 ```
 
-Définis dans `config/ui_config.h`.
+Toutes ces valeurs sont définies dans `config/ui_config.h` via les macros :
+`SCREEN_W`, `SCREEN_H`, `BORDER_H`, `BORDER_V`, `UI_X`, `UI_Y`, `UI_W`, `UI_H`,
+`STATUS_BAR_H`, `APP_X`, `APP_Y`, `APP_W`, `APP_H`.
 
 ### 6.2 Status bar
 
@@ -326,14 +337,15 @@ Définis dans `config/ui_config.h`.
 |-------|-------|--------|-------|
 | **Phase 1** | Step 1 : Squelette firmware (Arduino 3.3.8 + LVGL 9.x, partitions, config, FreeRTOS skeleton) | ✅ | |
 | | Step 2 : HAL complet (display CO5300 QSPI, touch CST9220, PMU AXP2101, RTC PCF85063, audio ES7210+NS4150B) | ✅ | Pins toutes vérifiées schéma rev2 — pas d'I2S TX (ampli analogique) |
-| | Step 3 : Status bar LVGL 9 (date FR, BLE/WiFi icônes, jauge batterie colorée) | 🔜 | |
-| | Step 4 : Launcher carousel 8 apps (tileview LVGL 9, swipe CST9220, boutons GPIO18/0) | 🔜 | |
-| | Step 5 : NVS + FATFS + SD optionnel | 🔜 | |
-| | Step 6 : WiFi manager + provisioning BLE | 🔜 | |
-| **Phase 2** | Step 7 : BLE 8 caractéristiques | 🔜 | |
-| | Step 8 : 7 apps existantes portées sur AppBase | 🔜 | |
-| **Phase 3** | Step 9 : App Rappels | 🔜 | |
-| | Step 10 : Wake word + STT/TTS (ESP-SR + Groq) | 🔜 | |
+| | Step 3 : Status bar LVGL 9 (date FR, BLE/WiFi icônes, jauge batterie colorée) | ✅ | Présent dans ui/status_bar.h/.cpp |
+| | Step 4 : Launcher carousel 8 apps (tileview LVGL 9, swipe CST9220, boutons GPIO18/0) | ✅ | Présent dans ui/launcher.h/.cpp |
+| | Step 5 : NVS + FATFS + SD optionnel | 🔜 | nvs_store.h/.cpp + reminder_store.h/.cpp à créer |
+| | Step 6 : WiFi manager + provisioning BLE | 🔜 | wifi_mgr.cpp manquant |
+| **Phase 2** | Step 7 : BLE 8 caractéristiques | ✅ | net/ble_manager.h/.cpp présent |
+| | Step 7b : http_client HTTPS Groq (TLS cert bundle) | 🔜 | net/http_client.h/.cpp à créer |
+| | Step 8 : 7 apps existantes portées sur AppBase | 🔜 | app_base.h à créer, squelettes présents |
+| **Phase 3** | Step 9 : App Rappels complète | 🔜 | ui_reminders présent, reminder_store manquant |
+| | Step 10 : Wake word + STT/TTS (ESP-SR + Groq) | 🔜 | voice_engine.h/.cpp présent, http_client requis |
 | | Step 11 : Agent brain mimiclaw + mémoire L0-L4 | 🔜 | |
 | **Phase 4** | Step 12 : PWA responsive + Rappels + sync | 🔜 | |
 | **Phase 5** | Step 13 : Tests intégration + OTA | 🔜 | |
