@@ -124,6 +124,14 @@ const Reminder* getById(int id) {
     return nullptr;
 }
 
+// fix: implémentation manquante de findById (déclarée dans .h mais absente)
+std::optional<Reminder> findById(int id) {
+    for (const auto& r : _reminders) {
+        if (r.id == id) return r;
+    }
+    return std::nullopt;
+}
+
 time_t nextTriggerEpoch() {
     time_t now = time(nullptr);
     time_t best = 0;

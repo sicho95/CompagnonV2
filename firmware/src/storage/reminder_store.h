@@ -14,7 +14,8 @@ struct Reminder {
 namespace ReminderStore {
     bool   load();           // charge /reminders.json depuis FATFS
     bool   save();           // persiste toute la liste
-    bool   add(Reminder& r); // assigne un id auto-incrémenté et sauvegarde
+    // fix: signature alignée sur l'implémentation .cpp (const ref, retourne int = id assigné)
+    int    add(const Reminder& r);
     bool   remove(int id);
     bool   update(const Reminder& r);
     const std::vector<Reminder>& getAll();
