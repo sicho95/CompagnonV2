@@ -6,6 +6,9 @@
 //        + guard _lv_initialized pour éviter double init
 // R5  — stack sizes augmentées : ui→12288, os→8192, ble→8192
 // W2  — WifiMgr::tick() appelé dans task_network
+// fix — appels UI via noms C-flat (extern "C") :
+//        ui_status_bar_init / ui_launcher_init / ui_status_bar_tick
+//        suppression ui::notification_init() inexistant dans le header
 // ============================================================
 #include "os_main.h"
 #include "os_kernel.h"
@@ -40,9 +43,10 @@ static void task_ui_lvgl(void*) {
         lv_init();
         _lv_initialized = true;
     }
-    ui::status_bar_init();
-    ui::launcher_init();
-    ui::notification_init();
+    // fix: appels C-flat (extern "C") — les headers ne déclarent pas de namespace ui::
+    ui_status_bar_init();
+    ui_launcher_init();
+    // notification_mgr.h déclare ui::notification_post/tick (pas d'init séparée)
     Serial.println("[UI] LVGL ready");
     for (;;) {
         lv_timer_handler();
@@ -60,7 +64,7 @@ static void task_os_main(void*) {
         kernel_tick();
         if (now - last_rtc_check >= 1000) {
             last_rtc_check = now;
-            ui::status_bar_tick();
+            ui_status_bar_tick(); // fix: C-flat
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
