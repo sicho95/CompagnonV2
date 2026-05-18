@@ -1,7 +1,7 @@
 #pragma once
 // ============================================================
 // CompagnonV2 — GPIO mapping Waveshare ESP32-S3-Touch-AMOLED-2.16"
-// Source : schémas ADC/Codec/Speaker fournis
+// Source : schémas ADC/Codec/Speaker/KEYS fournis
 // ============================================================
 
 // ── I2C bus partagé (ES7210 + ES8311 + AXP2101 + QMI8658) ───
@@ -37,15 +37,12 @@
 #define PIN_IMU_INT2     43
 
 // ── I2S bus partagé ES7210(RX) + ES8311(TX/RX) ───────────────
-// Source schéma Codec : GPIO42=I2S_MCLK, GPIO9=I2S_SCLK,
-//                       GPIO45=I2S_LRCK, GPIO8=I2S_DSDIN
-// Source schéma ADC   : même MCLK/LRCK, SDOUT1 → GPIO (à confirmer)
-#define PIN_I2S_MCLK     42   // MCLK partagé ES7210 + ES8311
-#define PIN_I2S_SCLK      9   // SCLK (BCLK)
-#define PIN_I2S_LRCK     45   // LRCK (WS)
-#define PIN_ES8311_DOUT   8   // I2S TX vers ES8311 DSDIN (DAC)
-#define PIN_ES8311_DIN    8   // I2S RX depuis ES8311 ASDOUT (ADC) — même pin, half-duplex
-#define PIN_ES7210_DIN   38   // I2S RX depuis ES7210 SDOUT1 (à confirmer sur schéma ADC)
+#define PIN_I2S_MCLK     42
+#define PIN_I2S_SCLK      9
+#define PIN_I2S_LRCK     45
+#define PIN_ES8311_DOUT   8
+#define PIN_ES8311_DIN    8
+#define PIN_ES7210_DIN   38
 
 // Aliases pour hal_audio.cpp
 #define PIN_ES7210_MCLK  PIN_I2S_MCLK
@@ -53,12 +50,18 @@
 #define PIN_ES7210_LRCK  PIN_I2S_LRCK
 
 // ── Speaker PA NS4150B ────────────────────────────────────────
-#define PIN_SPK_PA_EN    46   // GPIO46 → CTRL NS4150B
+#define PIN_SPK_PA_EN    46
 
 // ── Power latch (SYS_PWR) ─────────────────────────────────────
-// TODO: vérifier le GPIO exact sur le schéma Waveshare
-// GPIO21 est une valeur courante sur ce type de board — à adapter
-#define PIN_SYS_PWR      21
+// GPIO16 → Gate BSS138 (T1) via R11 1K → maintient SYS_OUT HIGH
+// Confirmé sur schéma KEYS : SYS_OUT connecté à GPIO16
+// À mettre HIGH dès le boot pour éviter l'extinction spontanée
+#define PIN_SYS_PWR      16
+
+// ── Keys ─────────────────────────────────────────────────────
+// Key2 = GPIO0  (boot button, alias PIN_BOOT_BTN)
+// Key3 = GPIO18 (bouton utilisateur)
+#define PIN_KEY3         18
 
 // ── SD Card (SPI optionnel) ───────────────────────────────────
 #define PIN_SD_CS         5
