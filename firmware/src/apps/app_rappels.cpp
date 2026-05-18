@@ -1,15 +1,12 @@
 // ============================================================
 // CompagnonV2 — apps/app_rappels.cpp
-// Fix 4 : #include <lvgl.h> présent en tête
-//         cast (void*)(intptr_t) — correct LVGL9 / 64-bit
-//         hal::audio::playTone supprimé → voice::speak
-// Fix 5 : #include "../voice/voice_engine.h" unifié
+// Fix: voice::speak() → voice_engine_speak() (API C unifiée)
 // ============================================================
 #include "app_rappels.h"
 #include "../system/scheduler.h"
 #include "../storage/nvs_store.h"
-#include "../voice/voice_engine.h"  // Fix 5 — header unifié voice::
-#include <lvgl.h>                   // Fix 4 — lv_obj_t, lv_event_t, etc.
+#include "../voice/voice_engine.h"
+#include <lvgl.h>
 #include <Arduino.h>
 #include <time.h>
 
@@ -20,12 +17,12 @@ static lv_obj_t* _lbl_empty = nullptr;
 static void _rebuild_list();
 
 static void _on_delete_btn(lv_event_t* e) {
-    // Fix 4 : cast (void*)(intptr_t) → int, correct sous LVGL9
     int id = (int)(intptr_t)lv_event_get_user_data(e);
     Scheduler::cancelAlarm(id);
     ReminderStore::remove(id);
     _rebuild_list();
-    voice::speak("Rappel supprimé.");  // Fix 4 : plus de hal::audio::playTone
+    // Fix: voice::speak() → voice_engine_speak()
+    voice_engine_speak("Rappel supprim\xc3\xa9.");
 }
 
 static void _rebuild_list() {
@@ -199,25 +196,26 @@ void AppRappels::handleIntent(const char* intent, const char* param) {
             struct tm lt; localtime_r(&r.datetime, &lt);
             char confirm[128];
             snprintf(confirm, sizeof(confirm),
-                     "Rappel créé pour le %d à %02dh%02d.",
+                     "Rappel cr\xc3\xa9\xc3\xa9 pour le %d \xc3\xa0 %02dh%02d.",
                      lt.tm_mday, lt.tm_hour, lt.tm_min);
-            voice::speak(confirm);
+            // Fix: voice::speak() → voice_engine_speak()
+            voice_engine_speak(confirm);
         }
     } else if (strcmp(intent, "delete_reminder") == 0) {
         int id = atoi(param);
         Scheduler::cancelAlarm(id);
         ReminderStore::remove(id);
         _rebuild_list();
-        voice::speak("Rappel supprimé.");
+        voice_engine_speak("Rappel supprim\xc3\xa9.");
     } else if (strcmp(intent, "list_reminders") == 0) {
         auto all = ReminderStore::getAll();
         if (all.empty()) {
-            voice::speak("Vous n'avez aucun rappel programmé.");
+            voice_engine_speak("Vous n'avez aucun rappel programm\xc3\xa9.");
         } else {
             String msg = String((int)all.size()) + " rappel";
             if (all.size() > 1) msg += "s";
             msg += " en attente.";
-            voice::speak(msg.c_str());
+            voice_engine_speak(msg.c_str());
         }
     }
 }

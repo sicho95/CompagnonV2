@@ -1,5 +1,7 @@
 // ============================================================
 // CompagnonV2 — system/os_kernel.cpp
+// Fix 1 — namespace voice:: bridgé vers voice_engine_* (C API)
+// Fix 2 — AppDesc aligné avec os_kernel.h (icon + instance + handle_intent)
 // B5  — static String _api_key pour éviter dangling pointer
 // R4  — fix iterator invalidation dans kernel_tick()
 // ============================================================
@@ -20,6 +22,15 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <Arduino.h>
+
+// ── Fix 1 : namespace voice:: → bridge vers l'API C voice_engine_* ──────────
+// os_kernel.cpp utilisait voice::init(), voice::Config, voice::speak(),
+// voice::set_mute() qui n'existent pas dans voice_engine.h (API pure C).
+// On crée un namespace local voice:: qui wrape les fonctions voice_engine_*.
+namespace voice {
+    inline void speak(const char* text)      { voice_engine_speak(text); }
+    inline void set_mute(bool mute)          { voice_engine_set_silent(mute); }
+} // namespace voice
 
 namespace os {
 
@@ -50,58 +61,22 @@ void kernel_init() {
     _silent       = NvsStore::getBool(NVS_NS, NVS_SILENT, false);
     _time_valid   = hal::rtc_is_valid();
 
-    // B5 — static pour garantir la durée de vie du pointeur
-    static String _api_key = NvsStore::getString("app", "groq_api_key", "");
-
-    voice::Config vcfg;
-    vcfg.groq_api_key   = _api_key.c_str(); // durée de vie garantie (static)
-    vcfg.stt_model      = "whisper-large-v3-turbo";
-    vcfg.tts_model      = "playai-tts";
-    vcfg.tts_voice      = "Fritz-PlayAI";
-    vcfg.vad_silence_ms = 1200;
-    vcfg.max_record_ms  = 10000;
-
-    voice::init(vcfg, [](const char* text) {
-        Serial.printf("[KERNEL] STT: %s\n", text);
-        VoiceIntent vi {};
-        String t = String(text);
-        t.toLowerCase();
-
-        if (t.indexOf("rappel") >= 0 || t.indexOf("réveille") >= 0
-            || t.indexOf("alarm") >= 0) {
-            vi.target_app = AppId::RAPPELS;
-            strncpy(vi.intent, "create_reminder", sizeof(vi.intent) - 1);
-        } else if (t.indexOf("nestor") >= 0 || t.indexOf("agent") >= 0) {
-            vi.target_app = AppId::NESTOR;
-            strncpy(vi.intent, "query", sizeof(vi.intent) - 1);
-        } else if (t.indexOf("bourse") >= 0 || t.indexOf("action") >= 0
-                   || t.indexOf("portfolio") >= 0) {
-            vi.target_app = AppId::BOURSE;
-            strncpy(vi.intent, "show", sizeof(vi.intent) - 1);
-        } else if (t.indexOf("météo") >= 0 || t.indexOf("meteo") >= 0
-                   || t.indexOf("température") >= 0) {
-            vi.target_app = AppId::METEO;
-            strncpy(vi.intent, "show", sizeof(vi.intent) - 1);
-        } else {
-            vi.target_app = AppId::NONE;
-            strncpy(vi.intent, "free_speech", sizeof(vi.intent) - 1);
-        }
-        strncpy(vi.param, text, sizeof(vi.param) - 1);
-        kernel_post_intent(vi);
-    });
+    voice_engine_init();
+    voice_engine_set_silent(_silent);
 
     Serial.printf("[KERNEL] init — silent=%d time_valid=%d\n",
                   _silent, _time_valid);
 }
 
 // ── Register apps ───────────────────────────────────────────
+// Fix 2 : AppDesc = { id, icon, instance*, handle_intent } — aligné avec .h
 void apps_register_all() {
-    _apps[(int)AppId::NESTOR]  = { AppId::NESTOR,  "🤖", &_app_nestor,
+    _apps[(int)AppId::NESTOR]  = { AppId::NESTOR,  "\U0001F916", &_app_nestor,
         [](const char* i, const char* p){ _app_nestor.handleIntent(i, p); } };
-    _apps[(int)AppId::RADARS]  = { AppId::RADARS,  "📡", &_app_radars,  nullptr };
-    _apps[(int)AppId::BOURSE]  = { AppId::BOURSE,  "📈", &_app_bourse,  nullptr };
-    _apps[(int)AppId::METEO]   = { AppId::METEO,   "🌤", &_app_meteo,   nullptr };
-    _apps[(int)AppId::RAPPELS] = { AppId::RAPPELS, "⏰", &_app_rappels,
+    _apps[(int)AppId::RADARS]  = { AppId::RADARS,  "\U0001F4E1", &_app_radars,  nullptr };
+    _apps[(int)AppId::BOURSE]  = { AppId::BOURSE,  "\U0001F4C8", &_app_bourse,  nullptr };
+    _apps[(int)AppId::METEO]   = { AppId::METEO,   "\U0001F324", &_app_meteo,   nullptr };
+    _apps[(int)AppId::RAPPELS] = { AppId::RAPPELS, "\u23F0",     &_app_rappels,
         [](const char* i, const char* p){ _app_rappels.handleIntent(i, p); } };
     Serial.println("[KERNEL] 5 apps registered");
 }
@@ -185,14 +160,13 @@ void kernel_tick() {
         // R4 — pas d'itération + modification simultanée du vecteur.
         // On collecte l'id à annuler, puis on agit hors de la boucle.
         int to_cancel = -1;
-        const char* fired_label = nullptr;
-        Reminder fired_copy; // copie locale pour éviter dangling ptr après cancel
+        Reminder fired_copy;
 
         for (const auto& a : Scheduler::getScheduled()) {
             if (a.trigger_epoch > 0 && a.trigger_epoch <= now + 2) {
                 Reminder* r = ReminderStore::getById(a.reminder_id);
                 if (r && r->enabled) {
-                    fired_copy  = *r;          // copie avant cancel
+                    fired_copy  = *r;
                     to_cancel   = a.reminder_id;
                     break;
                 }
@@ -203,7 +177,7 @@ void kernel_tick() {
             Serial.printf("[KERNEL] Alarm fired: %s\n", fired_copy.label.c_str());
             ui::notification_post(fired_copy.label, 8000);
             if (!_silent) voice::speak(fired_copy.label.c_str());
-            Scheduler::cancelAlarm(to_cancel);    // safe : hors de la boucle
+            Scheduler::cancelAlarm(to_cancel);
             kernel_schedule_next_reminder();
         }
     }

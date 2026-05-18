@@ -6,6 +6,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include "../apps/app_base.h"
 
 namespace os {
 
@@ -24,13 +25,16 @@ enum class AppId : uint8_t {
 };
 
 // ── App descriptor (enregistrement statique) ─────────────────
+// Fix: structure alignée avec os_kernel.cpp :
+//   - icon   : emoji ou nom icône
+//   - instance : pointeur AppBase* (lifecycle init/onResume/onPause)
+//   - handle_intent : lambda ou fn ptr (intent vocal)
+//   - start/stop supprimés (remplacés par instance->init/onResume/onPause)
 struct AppDesc {
     AppId       id;
-    const char* name;
     const char* icon;        // emoji ou nom icône
-    bool  (*start)();        // alloue LVGL + task FreeRTOS
-    void  (*stop)();         // libère LVGL + task
-    void  (*handle_intent)(const char* intent, const char* param);
+    AppBase*    instance;    // pointeur vers l'instance statique de l'app
+    void  (*handle_intent)(const char* intent, const char* param);  // peut être nullptr
 };
 
 // ── Intent vocal (queue kernel) ──────────────────────────────
@@ -41,13 +45,15 @@ struct VoiceIntent {
 };
 
 // ── API kernel ───────────────────────────────────────────────
-void   kernel_init();
-void   apps_register_all();          // appel boot, coût RAM ~0
-bool   app_launch(AppId id);         // start + affiche
-void   app_close_current();          // stop + retour launcher
-AppId  app_current();
+void     kernel_init();
+void     apps_register_all();          // appel boot, coût RAM ~0
+bool     app_launch(AppId id);         // start + affiche
+void     app_close_current();          // stop + retour launcher
+AppId    app_current();
+AppBase* app_get_instance(AppId id);   // fix: déclaration manquante
 
 void   kernel_post_intent(const VoiceIntent& intent); // depuis task_voice
+void   kernel_post_alarm(const char* label);          // depuis ISR/deep-sleep
 void   kernel_set_silent(bool silent);                // mode silencieux
 bool   kernel_is_silent();
 void   kernel_set_time_valid(bool v);                 // heure ok ?
