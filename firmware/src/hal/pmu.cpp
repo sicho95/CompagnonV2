@@ -1,5 +1,7 @@
 // =============================================================
 // CompagnonV2 — hal/pmu.cpp
+// fix: toutes les fonctions envelöppées dans namespace hal
+//      pour correspondre aux déclarations hal::pmu_* du .h
 // =============================================================
 #include "pmu.h"
 
@@ -7,6 +9,8 @@ XPowersAXP2101 pmu;
 volatile bool pmu_irq_flag = false;
 
 static pmu_long_press_cb_t _long_press_cb = nullptr;
+
+namespace hal {
 
 void pmu_set_long_press_cb(pmu_long_press_cb_t cb) {
     _long_press_cb = cb;
@@ -71,3 +75,5 @@ bool pmu_is_charging() {
 uint16_t pmu_battery_voltage_mv() {
     return (uint16_t)pmu.getBattVoltage();
 }
+
+} // namespace hal
