@@ -3,6 +3,7 @@
 // CST9220 I2C touch controller
 // TP_INT=GPIO11, TP_RST=GPIO40 (corrigé schéma)
 // ============================================================
+#include <Arduino.h>        // fix: Serial, pinMode, digitalWrite, delay
 #include "touch.h"
 #include "../../include/pins.h"
 #include <Wire.h>

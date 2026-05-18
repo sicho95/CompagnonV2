@@ -4,9 +4,11 @@
 #include <freertos/task.h>
 #include <freertos/queue.h>
 
-static bool          _silent  = false;
-static bool          _running = false;
-static QueueHandle_t _speak_q = nullptr;
+static bool          _silent       = false;
+static bool          _running      = false;
+static bool          _recording    = false;  // fix: flag capture manuelle
+static bool          _wake_detected = false; // fix: flag wake word
+static QueueHandle_t _speak_q      = nullptr;
 
 #define SPEAK_MAX_LEN 256
 
@@ -20,6 +22,11 @@ static void _voice_task(void* pvParam) {
             }
         }
         // TODO : lecture mic ES7210, détection wake word
+        // Remettre _wake_detected = true ici quand wake word détecté
+        if (_recording) {
+            // TODO : capturer l'audio et envoyer STT
+            _recording = false;
+        }
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
@@ -31,8 +38,13 @@ void voice_engine_init() {
     Serial.println("[VOICE] engine init OK (Core 0)");
 }
 
-void voice_engine_set_silent(bool s) { _silent = s; }
-bool voice_engine_is_listening()     { return _running && !_silent; }
+void voice_engine_set_silent(bool s)      { _silent = s; }
+bool voice_engine_is_listening()          { return _running && !_silent; }
+
+// fix: implémentations des fonctions manquantes
+bool voice_engine_is_silent()             { return _silent; }
+void voice_engine_start_recording()       { _recording = true; Serial.println("[VOICE] recording started"); }
+bool voice_engine_wake_word_detected()    { bool v = _wake_detected; _wake_detected = false; return v; }
 
 void voice_engine_speak(const char* text) {
     if (!text || !_speak_q) return;

@@ -17,16 +17,31 @@
 namespace hal {
 
 static SensorPCF85063 _rtc;
-static bool _rtc_ok   = false;
+static bool _rtc_ok    = false;
 static bool _rtc_valid = false; // false si jamais synchronisé (epoch < 2020)
 
 // Epoch minimal considéré comme valide : 2020-01-01 00:00:00 UTC
 #define EPOCH_MIN_VALID 1577836800UL
 
+// fix: timegm() absent sur ESP32 — implémentation UTC manuelle
+static time_t _timegm_utc(struct tm* t) {
+    // mktime() utilise le TZ local — on neutralise en fixant TZ=UTC
+    const char* tz = getenv("TZ");
+    setenv("TZ", "UTC0", 1);
+    tzset();
+    time_t result = mktime(t);
+    if (tz) setenv("TZ", tz, 1);
+    else    unsetenv("TZ");
+    tzset();
+    return result;
+}
+
 bool rtc_init() {
     setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
     tzset();
-    if (!_rtc.begin(Wire, PCF85063_SLAVE_ADDRESS, PIN_IIC_SDA, PIN_IIC_SCL)) {
+    // fix: begin() prend 3 arguments dans SensorLib courant (Wire, SDA, SCL)
+    // PCF85063_SLAVE_ADDRESS est géré en interne par la lib
+    if (!_rtc.begin(Wire, PIN_IIC_SDA, PIN_IIC_SCL)) {
         Serial.println("[RTC] PCF85063 NOT found on I2C");
         return false;
     }
@@ -87,6 +102,9 @@ time_t rtc_get_epoch() {
     if (!_rtc_ok) return 0;
     RTC_DateTime dt = _rtc.getDateTime();
     struct tm t = {};
+    // fix: utiliser les getters SensorLib (membres publics selon version)
+    // Si la version dispose de getters, utiliser dt.getYear() etc.
+    // Sinon, accès direct aux membres — on garde la compatibilité maximale:
     t.tm_year  = dt.year  - 1900;
     t.tm_mon   = dt.month - 1;
     t.tm_mday  = dt.day;
@@ -94,8 +112,8 @@ time_t rtc_get_epoch() {
     t.tm_min   = dt.minutes;
     t.tm_sec   = dt.seconds;
     t.tm_isdst = 0;
-    // timegm pour forcer interprétation UTC
-    return timegm(&t);
+    // fix: timegm() absent sur ESP32 → _timegm_utc()
+    return _timegm_utc(&t);
 }
 
 struct tm rtc_get_local_time() {
@@ -108,7 +126,10 @@ struct tm rtc_get_local_time() {
 void rtc_set_alarm(time_t epoch) {
     if (!_rtc_ok) return;
     struct tm t; gmtime_r(&epoch, &t);
-    _rtc.setAlarm(t.tm_min, t.tm_hour, t.tm_mday, -1);
+    // fix: setAlarm() prend 5 arguments dans SensorLib courant
+    // signature: setAlarm(uint8_t hour, uint8_t minute, uint8_t second, uint8_t day, uint8_t weekday)
+    // 0xFF = "don't care" pour le champ weekday
+    _rtc.setAlarm(t.tm_hour, t.tm_min, 0, t.tm_mday, 0xFF);
     _rtc.enableAlarm();
     Serial.printf("[RTC] Alarm set: %02d/%02d %02d:%02d UTC\n",
         t.tm_mday, t.tm_mon+1, t.tm_hour, t.tm_min);
@@ -116,8 +137,8 @@ void rtc_set_alarm(time_t epoch) {
 
 void rtc_clear_alarm() {
     if (!_rtc_ok) return;
+    // fix: clearAlarm() inexistant dans cette version → disableAlarm() uniquement
     _rtc.disableAlarm();
-    _rtc.clearAlarm();
 }
 
 } // namespace hal

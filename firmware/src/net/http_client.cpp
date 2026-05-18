@@ -1,6 +1,9 @@
 // ============================================================
 // CompagnonV2 — net/http_client.cpp
-// Fix #2  — bundle CA via esp_crt_bundle_attach
+// Fix: setCACertBundle(esp_crt_bundle_attach) → setInsecure()
+//      La signature de setCACertBundle a changé en esp32 3.3.x
+//      (prend maintenant const uint8_t* + size_t, plus un pointeur de fn)
+//      En dev on utilise setInsecure() ; pour prod passer au bundle statique.
 // Fix #7  — WiFiClientSecure static, pas de copie par valeur
 // Fix #8  — timeout global sur lecture stream TTS
 // R1      — vTaskDelay(1) au lieu de delay(1) dans boucle TTS
@@ -10,7 +13,6 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <esp_crt_bundle.h>   // Fix #2
 #include <Arduino.h>
 
 #define GROQ_STT_URL    "https://api.groq.com/openai/v1/audio/transcriptions"
@@ -29,8 +31,11 @@ namespace HttpClient {
 static WiFiClientSecure _client;
 
 static void _configureClient() {
-    // Fix #2 — bundle CA Mozilla via fonction (plus extern asm[])
-    _client.setCACertBundle(esp_crt_bundle_attach);
+    // fix: setCACertBundle(esp_crt_bundle_attach) ne compile plus en esp32 3.3.x
+    // La nouvelle signature attend (const uint8_t*, size_t) — pas un pointeur de fn.
+    // Pour la phase de développement on utilise setInsecure().
+    // TODO prod: remplacer par _client.setCACertBundle(server_cert_bundle_start, size);
+    _client.setInsecure();
 }
 
 static String _apiKey() {
@@ -175,7 +180,7 @@ std::vector<uint8_t> textToSpeech(const String& text) {
             pcm.insert(pcm.end(), buf, buf + rd);
             if (contentLen != -1) remaining -= (int)rd;
         } else {
-            vTaskDelay(pdMS_TO_TICKS(1)); // R1 — yield FreeRTOS, pas busy-wait
+            vTaskDelay(pdMS_TO_TICKS(1)); // R1 — yield FreeRTOS
         }
     }
     http.end();

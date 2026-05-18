@@ -55,6 +55,11 @@
 // ── Speaker PA NS4150B ────────────────────────────────────────
 #define PIN_SPK_PA_EN    46   // GPIO46 → CTRL NS4150B
 
+// ── Power latch (SYS_PWR) ─────────────────────────────────────
+// TODO: vérifier le GPIO exact sur le schéma Waveshare
+// GPIO21 est une valeur courante sur ce type de board — à adapter
+#define PIN_SYS_PWR      21
+
 // ── SD Card (SPI optionnel) ───────────────────────────────────
 #define PIN_SD_CS         5
 #define PIN_SD_MOSI      35

@@ -5,7 +5,7 @@
 #include "../voice/voice_engine.h"
 #include <Arduino.h>
 #include <SPIFFS.h>
-#include <ArduinoJson.h>
+#include <ArduinoJson.h>   // fix: JsonDocument (ArduinoJson 7, DynamicJsonDocument déprecié)
 #include <time.h>
 #include <vector>
 #include <string>
@@ -40,7 +40,8 @@ static void _load() {
     _reminders.clear();
     if (!SPIFFS.exists(STORAGE_PATH)) return;
     File f = SPIFFS.open(STORAGE_PATH, "r"); if (!f) return;
-    DynamicJsonDocument doc(8192);
+    // fix: JsonDocument remplace DynamicJsonDocument (ArduinoJson 7)
+    JsonDocument doc;
     if (deserializeJson(doc, f) != DeserializationError::Ok) { f.close(); return; }
     f.close();
     for (JsonObject o : doc.as<JsonArray>()) {
@@ -57,10 +58,12 @@ static void _load() {
 
 static void _save() {
     File f = SPIFFS.open(STORAGE_PATH, "w"); if (!f) return;
-    DynamicJsonDocument doc(8192);
+    // fix: JsonDocument remplace DynamicJsonDocument (ArduinoJson 7)
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
     for (auto& r : _reminders) {
-        JsonObject o = arr.createNestedObject();
+        // fix: arr.add<JsonObject>() remplace arr.createNestedObject() (ArduinoJson 7)
+        JsonObject o = arr.add<JsonObject>();
         o["id"] = r.id; o["title"] = r.title; o["description"] = r.description;
         o["datetime"] = r.datetime; o["advance_min"] = r.advance_min; o["done"] = r.done;
     }
@@ -85,7 +88,6 @@ static void _refresh_list() {
         lv_obj_set_style_text_font(sub, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(sub, lv_color_hex(0x888888), 0);
         lv_obj_add_event_cb(row, [](lv_event_t* e) {
-            // fix: cast explicite void* → lv_obj_t* requis en C++ avec LVGL 9
             lv_obj_t* target = (lv_obj_t*)lv_event_get_target(e);
             size_t idx = (size_t)(uintptr_t)lv_obj_get_user_data(target);
             if (idx < _reminders.size()) {
@@ -188,7 +190,6 @@ void start() {
     lv_obj_t* mic_lbl = lv_label_create(_mic_btn);
     lv_label_set_text(mic_lbl, LV_SYMBOL_AUDIO); lv_obj_center(mic_lbl);
     lv_obj_add_event_cb(_mic_btn, [](lv_event_t*) {
-        // fix: voice::start_recording() inexistant → voice_engine_start_recording()
         voice_engine_start_recording();
     }, LV_EVENT_CLICKED, nullptr);
 
@@ -222,12 +223,11 @@ void tick() {
         if (now >= t_wup && now < t_wup + 60) {
             char msg[160];
             snprintf(msg, sizeof(msg), "Rappel : %s.", r.title);
-            // fix: voice::speak() inexistant → voice_engine_speak()
             voice_engine_speak(msg);
             r.done = true; _save(); _refresh_list();
         }
     }
-    // Indicateur micro actif
+    // Indicateur micro actif (wake word)
     if (_mic_btn && !voice_engine_wake_word_detected()) {
         lv_obj_set_style_bg_color(_mic_btn, lv_color_hex(0x333355), 0);
     } else if (_mic_btn) {
@@ -236,10 +236,8 @@ void tick() {
 }
 
 void handle_voice_intent(const char* intent_json) {
-    // intent_json: résultat STT/LLM parsé par voice_engine
     char confirm[128];
     snprintf(confirm, sizeof(confirm), "Compris : %s", intent_json);
-    // fix: voice::speak() inexistant → voice_engine_speak()
     voice_engine_speak(confirm);
 }
 
