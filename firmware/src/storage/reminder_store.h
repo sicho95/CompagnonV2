@@ -19,10 +19,8 @@ namespace ReminderStore {
     bool   update(const Reminder& r);
     const std::vector<Reminder>& getAll();
 
-    // W3 — retour par pointeur brut conservé pour compatibilité interne
-    //      (le vecteur n'est pas modifié pendant l'usage de ce ptr)
-    //      À terme : migrer vers std::optional<Reminder> côté appelants.
-    Reminder* getById(int id);
+    // fix: aligné sur l'implémentation .cpp (const Reminder*)
+    const Reminder* getById(int id);
 
     // W3 — version sûre : copie de la Reminder (pas de ptr invalide après add/remove)
     std::optional<Reminder> findById(int id);

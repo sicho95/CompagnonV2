@@ -4,6 +4,8 @@
 // Driver : AXP2101 via XPowersLib 0.3.x
 // IRQ activées : PKEY_SHORT (backlight toggle)
 //                PKEY_LONG  (poweroff complet)
+// fix: fonctions déclarées dans namespace hal pour correspondre
+//      à l'appel hal::pmu_init() dans main.cpp
 // =============================================================
 #include <Wire.h>
 #include <XPowersLib.h>
@@ -19,22 +21,24 @@ typedef enum {
     PMU_EVT_PWR_LONG,    // appui long  PWR → arrêt complet
 } pmu_event_t;
 
-// Callback long press (utilisé par le .ino)
+// Callback long press
 typedef void (*pmu_long_press_cb_t)();
-
-bool         pmu_init();
-pmu_event_t  pmu_handle_irq();
-void         pmu_poweroff();
-int          pmu_battery_percent();
-bool         pmu_is_charging();
-uint16_t     pmu_battery_voltage_mv();
-void         pmu_set_long_press_cb(pmu_long_press_cb_t cb);
 
 extern volatile bool pmu_irq_flag;
 
+namespace hal {
+    bool         pmu_init();
+    pmu_event_t  pmu_handle_irq();
+    void         pmu_poweroff();
+    int          pmu_battery_percent();
+    bool         pmu_is_charging();
+    uint16_t     pmu_battery_voltage_mv();
+    void         pmu_set_long_press_cb(pmu_long_press_cb_t cb);
+} // namespace hal
+
 // ── Aliases flat C pour le .ino ──────────────────────────────────
-inline bool hal_pmu_init()                           { return pmu_init(); }
-inline void hal_pmu_tick()                           { pmu_handle_irq(); }
-inline int  hal_pmu_battery_pct()                    { return pmu_battery_percent(); }
-inline bool hal_pmu_is_charging()                    { return pmu_is_charging(); }
-inline void hal_pmu_set_long_press_cb(pmu_long_press_cb_t cb) { pmu_set_long_press_cb(cb); }
+inline bool hal_pmu_init()                           { return hal::pmu_init(); }
+inline void hal_pmu_tick()                           { hal::pmu_handle_irq(); }
+inline int  hal_pmu_battery_pct()                    { return hal::pmu_battery_percent(); }
+inline bool hal_pmu_is_charging()                    { return hal::pmu_is_charging(); }
+inline void hal_pmu_set_long_press_cb(pmu_long_press_cb_t cb) { hal::pmu_set_long_press_cb(cb); }

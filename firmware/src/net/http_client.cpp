@@ -1,11 +1,9 @@
 // ============================================================
 // CompagnonV2 — net/http_client.cpp
-// Fix: setCACertBundle(esp_crt_bundle_attach) → setInsecure()
-//      La signature de setCACertBundle a changé en esp32 3.3.x
-//      (prend maintenant const uint8_t* + size_t, plus un pointeur de fn)
-//      En dev on utilise setInsecure() ; pour prod passer au bundle statique.
-// Fix #7  — WiFiClientSecure static, pas de copie par valeur
-// Fix #8  — timeout global sur lecture stream TTS
+// fix: setCACertBundle(esp_crt_bundle_attach) → setInsecure()
+// fix: WiFiClient* → NetworkClient* (esp32 3.3.x)
+// fix #7  — WiFiClientSecure static, pas de copie par valeur
+// fix #8  — timeout global sur lecture stream TTS
 // R1      — vTaskDelay(1) au lieu de delay(1) dans boucle TTS
 // ============================================================
 #include "http_client.h"
@@ -14,6 +12,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <Arduino.h>
+#include <NetworkClient.h>
 
 #define GROQ_STT_URL    "https://api.groq.com/openai/v1/audio/transcriptions"
 #define GROQ_CHAT_URL   "https://api.groq.com/openai/v1/chat/completions"
@@ -27,14 +26,11 @@
 
 namespace HttpClient {
 
-// Fix #7 — client static, jamais copié
+// fix #7 — client static, jamais copié
 static WiFiClientSecure _client;
 
 static void _configureClient() {
     // fix: setCACertBundle(esp_crt_bundle_attach) ne compile plus en esp32 3.3.x
-    // La nouvelle signature attend (const uint8_t*, size_t) — pas un pointeur de fn.
-    // Pour la phase de développement on utilise setInsecure().
-    // TODO prod: remplacer par _client.setCACertBundle(server_cert_bundle_start, size);
     _client.setInsecure();
 }
 
@@ -158,12 +154,12 @@ std::vector<uint8_t> textToSpeech(const String& text) {
         return {};
     }
 
-    // Fix #8 + R1 — lecture stream avec timeout global + vTaskDelay
+    // fix: NetworkClient* au lieu de WiFiClient* (esp32 3.3.x)
     int contentLen = http.getSize();
     std::vector<uint8_t> pcm;
     if (contentLen > 0) pcm.reserve((size_t)contentLen);
 
-    WiFiClient* stream = http.getStreamPtr();
+    NetworkClient* stream = http.getStreamPtr();
     uint8_t buf[512];
     unsigned long t0 = millis();
     int remaining = contentLen;
@@ -180,7 +176,7 @@ std::vector<uint8_t> textToSpeech(const String& text) {
             pcm.insert(pcm.end(), buf, buf + rd);
             if (contentLen != -1) remaining -= (int)rd;
         } else {
-            vTaskDelay(pdMS_TO_TICKS(1)); // R1 — yield FreeRTOS
+            vTaskDelay(pdMS_TO_TICKS(1));
         }
     }
     http.end();

@@ -25,7 +25,6 @@ static bool _rtc_valid = false; // false si jamais synchronisé (epoch < 2020)
 
 // fix: timegm() absent sur ESP32 — implémentation UTC manuelle
 static time_t _timegm_utc(struct tm* t) {
-    // mktime() utilise le TZ local — on neutralise en fixant TZ=UTC
     const char* tz = getenv("TZ");
     setenv("TZ", "UTC0", 1);
     tzset();
@@ -39,14 +38,11 @@ static time_t _timegm_utc(struct tm* t) {
 bool rtc_init() {
     setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
     tzset();
-    // fix: begin() prend 3 arguments dans SensorLib courant (Wire, SDA, SCL)
-    // PCF85063_SLAVE_ADDRESS est géré en interne par la lib
     if (!_rtc.begin(Wire, PIN_IIC_SDA, PIN_IIC_SCL)) {
         Serial.println("[RTC] PCF85063 NOT found on I2C");
         return false;
     }
     _rtc_ok = true;
-    // Vérifier si l'heure stockée est plausible
     time_t ep = rtc_get_epoch();
     _rtc_valid = (ep > EPOCH_MIN_VALID);
     Serial.printf("[RTC] PCF85063 OK — epoch=%lu valid=%s\n",
@@ -78,7 +74,6 @@ static void _write_rtc(time_t epoch) {
     gmtime_r(&epoch, &t);
     _rtc.setDateTime(t.tm_year+1900, t.tm_mon+1, t.tm_mday,
                      t.tm_hour, t.tm_min, t.tm_sec);
-    // Mettre aussi à jour system time
     struct timeval tv = { .tv_sec = epoch, .tv_usec = 0 };
     settimeofday(&tv, NULL);
     _rtc_valid = true;
@@ -102,17 +97,14 @@ time_t rtc_get_epoch() {
     if (!_rtc_ok) return 0;
     RTC_DateTime dt = _rtc.getDateTime();
     struct tm t = {};
-    // fix: utiliser les getters SensorLib (membres publics selon version)
-    // Si la version dispose de getters, utiliser dt.getYear() etc.
-    // Sinon, accès direct aux membres — on garde la compatibilité maximale:
-    t.tm_year  = dt.year  - 1900;
-    t.tm_mon   = dt.month - 1;
-    t.tm_mday  = dt.day;
-    t.tm_hour  = dt.hours;
-    t.tm_min   = dt.minutes;
-    t.tm_sec   = dt.seconds;
+    // fix: SensorLib 0.4.1 — membres privés, utiliser les getters
+    t.tm_year  = dt.getYear()  - 1900;
+    t.tm_mon   = dt.getMonth() - 1;
+    t.tm_mday  = dt.getDay();
+    t.tm_hour  = dt.getHour();
+    t.tm_min   = dt.getMinute();
+    t.tm_sec   = dt.getSecond();
     t.tm_isdst = 0;
-    // fix: timegm() absent sur ESP32 → _timegm_utc()
     return _timegm_utc(&t);
 }
 
@@ -126,9 +118,6 @@ struct tm rtc_get_local_time() {
 void rtc_set_alarm(time_t epoch) {
     if (!_rtc_ok) return;
     struct tm t; gmtime_r(&epoch, &t);
-    // fix: setAlarm() prend 5 arguments dans SensorLib courant
-    // signature: setAlarm(uint8_t hour, uint8_t minute, uint8_t second, uint8_t day, uint8_t weekday)
-    // 0xFF = "don't care" pour le champ weekday
     _rtc.setAlarm(t.tm_hour, t.tm_min, 0, t.tm_mday, 0xFF);
     _rtc.enableAlarm();
     Serial.printf("[RTC] Alarm set: %02d/%02d %02d:%02d UTC\n",
@@ -137,7 +126,6 @@ void rtc_set_alarm(time_t epoch) {
 
 void rtc_clear_alarm() {
     if (!_rtc_ok) return;
-    // fix: clearAlarm() inexistant dans cette version → disableAlarm() uniquement
     _rtc.disableAlarm();
 }
 
