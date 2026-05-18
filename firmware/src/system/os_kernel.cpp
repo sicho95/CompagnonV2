@@ -1,9 +1,10 @@
 // ============================================================
 // CompagnonV2 — system/os_kernel.cpp
 // Fix 1 — namespace voice:: bridgé vers voice_engine_* (C API)
-// Fix 2 — AppDesc aligné avec os_kernel.h (icon + instance + handle_intent)
-// B5  — static String _api_key pour éviter dangling pointer
+// Fix 2 — AppDesc aligné avec os_kernel.h
+// B5  — static String _api_key
 // R4  — fix iterator invalidation dans kernel_tick()
+// fix: const Reminder* (getById retourne const)
 // ============================================================
 #include "os_kernel.h"
 #include "../hal/rtc.h"
@@ -23,14 +24,10 @@
 #include <freertos/queue.h>
 #include <Arduino.h>
 
-// ── Fix 1 : namespace voice:: → bridge vers l'API C voice_engine_* ──────────
-// os_kernel.cpp utilisait voice::init(), voice::Config, voice::speak(),
-// voice::set_mute() qui n'existent pas dans voice_engine.h (API pure C).
-// On crée un namespace local voice:: qui wrape les fonctions voice_engine_*.
 namespace voice {
-    inline void speak(const char* text)      { voice_engine_speak(text); }
-    inline void set_mute(bool mute)          { voice_engine_set_silent(mute); }
-} // namespace voice
+    inline void speak(const char* text) { voice_engine_speak(text); }
+    inline void set_mute(bool mute)     { voice_engine_set_silent(mute); }
+}
 
 namespace os {
 
@@ -54,22 +51,16 @@ static QueueHandle_t _alarm_queue = nullptr;
 static constexpr const char* NVS_NS     = "os_cfg";
 static constexpr const char* NVS_SILENT = "silent";
 
-// ── Init ─────────────────────────────────────────────────────
 void kernel_init() {
     _intent_queue = xQueueCreate(8, sizeof(VoiceIntent));
     _alarm_queue  = xQueueCreate(4, sizeof(PendingAlarm));
     _silent       = NvsStore::getBool(NVS_NS, NVS_SILENT, false);
     _time_valid   = hal::rtc_is_valid();
-
     voice_engine_init();
     voice_engine_set_silent(_silent);
-
-    Serial.printf("[KERNEL] init — silent=%d time_valid=%d\n",
-                  _silent, _time_valid);
+    Serial.printf("[KERNEL] init — silent=%d time_valid=%d\n", _silent, _time_valid);
 }
 
-// ── Register apps ───────────────────────────────────────────
-// Fix 2 : AppDesc = { id, icon, instance*, handle_intent } — aligné avec .h
 void apps_register_all() {
     _apps[(int)AppId::NESTOR]  = { AppId::NESTOR,  "\U0001F916", &_app_nestor,
         [](const char* i, const char* p){ _app_nestor.handleIntent(i, p); } };
@@ -81,7 +72,6 @@ void apps_register_all() {
     Serial.println("[KERNEL] 5 apps registered");
 }
 
-// ── App lifecycle ────────────────────────────────────────────
 bool app_launch(AppId id) {
     if (id == AppId::NONE || (int)id >= (int)AppId::COUNT) return false;
     AppDesc& desc = _apps[(int)id];
@@ -118,16 +108,15 @@ void kernel_set_silent(bool s) {
     NvsStore::setBool(NVS_NS, NVS_SILENT, s);
     voice::set_mute(s);
 }
-bool kernel_is_silent()            { return _silent; }
-void kernel_set_time_valid(bool v)  { _time_valid = v; }
-bool kernel_time_is_valid()         { return _time_valid; }
+bool kernel_is_silent()           { return _silent; }
+void kernel_set_time_valid(bool v) { _time_valid = v; }
+bool kernel_time_is_valid()        { return _time_valid; }
 
 void kernel_schedule_next_reminder() {
     time_t next = _app_rappels.nextEpoch();
     if (next > 0) {
         hal::rtc_set_alarm(next);
-        Serial.printf("[KERNEL] Next reminder alarm at epoch %lu\n",
-                      (unsigned long)next);
+        Serial.printf("[KERNEL] Next reminder alarm at epoch %lu\n", (unsigned long)next);
     } else {
         hal::rtc_clear_alarm();
     }
@@ -141,38 +130,29 @@ void kernel_post_alarm(const char* label) {
     xQueueSend(_alarm_queue, &a, 0);
 }
 
-// ── kernel_tick() — Core 1, 20ms ─────────────────────────────
 void kernel_tick() {
-    // 1. update() app active
     if (_current_app != AppId::NONE && _apps[(int)_current_app].instance)
         _apps[(int)_current_app].instance->update();
 
-    // 2. Overlay notification tick
     ui::notification_tick();
 
-    // 3. Poll alarmes planifiées (mode actif, pas deep sleep)
     static uint32_t _last_alarm_poll = 0;
     uint32_t now_ms = millis();
     if (now_ms - _last_alarm_poll >= 1000) {
         _last_alarm_poll = now_ms;
         time_t now = time(nullptr);
-
-        // R4 — pas d'itération + modification simultanée du vecteur.
-        // On collecte l'id à annuler, puis on agit hors de la boucle.
         int to_cancel = -1;
         Reminder fired_copy;
-
         for (const auto& a : Scheduler::getScheduled()) {
             if (a.trigger_epoch > 0 && a.trigger_epoch <= now + 2) {
-                Reminder* r = ReminderStore::getById(a.reminder_id);
+                const Reminder* r = ReminderStore::getById(a.reminder_id);
                 if (r && r->enabled) {
-                    fired_copy  = *r;
-                    to_cancel   = a.reminder_id;
+                    fired_copy = *r;
+                    to_cancel  = a.reminder_id;
                     break;
                 }
             }
         }
-
         if (to_cancel >= 0) {
             Serial.printf("[KERNEL] Alarm fired: %s\n", fired_copy.label.c_str());
             ui::notification_post(fired_copy.label, 8000);
@@ -182,21 +162,17 @@ void kernel_tick() {
         }
     }
 
-    // 4. Alarmes deep-sleep remontées via kernel_post_alarm()
     PendingAlarm pending;
     while (xQueueReceive(_alarm_queue, &pending, 0) == pdTRUE) {
         ui::notification_post(String(pending.label), 8000);
         if (!_silent) voice::speak(pending.label);
     }
 
-    // 5. Intents vocaux
     VoiceIntent intent;
     while (xQueueReceive(_intent_queue, &intent, 0) == pdTRUE) {
-        if (intent.target_app != AppId::NONE &&
-            intent.target_app != _current_app)
+        if (intent.target_app != AppId::NONE && intent.target_app != _current_app)
             app_launch(intent.target_app);
-        AppId target = (intent.target_app != AppId::NONE)
-                       ? intent.target_app : _current_app;
+        AppId target = (intent.target_app != AppId::NONE) ? intent.target_app : _current_app;
         if (target != AppId::NONE && _apps[(int)target].handle_intent)
             _apps[(int)target].handle_intent(intent.intent, intent.param);
     }

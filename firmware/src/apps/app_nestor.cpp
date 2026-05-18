@@ -12,7 +12,6 @@ static lv_obj_t* _screen     = nullptr;
 static lv_obj_t* _msg_list   = nullptr;
 static lv_obj_t* _lbl_status = nullptr;
 
-// ── Mots-clés pour router l'intent localement ─────────────────────────────
 static bool _is_reminder_request(const String& text) {
     String t = text;
     t.toLowerCase();
@@ -23,14 +22,12 @@ static bool _is_reminder_request(const String& text) {
             t.indexOf("alarme")   >= 0);
 }
 
-// ── Parser la date/heure depuis le texte STT ──────────────────────────────
 static time_t _parse_reminder_time(const String& raw) {
     String text = raw;
     text.toLowerCase();
     time_t now = time(nullptr);
     struct tm t;
     localtime_r(&now, &t);
-
     int idx_dans = text.indexOf("dans ");
     if (idx_dans >= 0) {
         int num = text.substring(idx_dans + 5).toInt();
@@ -39,7 +36,6 @@ static time_t _parse_reminder_time(const String& raw) {
             return now + (time_t)(num * 60);
         }
     }
-
     bool demain = (text.indexOf("demain") >= 0);
     if (demain || text.indexOf("aujourd") >= 0) {
         for (int i = 0; i < (int)text.length(); i++) {
@@ -48,27 +44,21 @@ static time_t _parse_reminder_time(const String& raw) {
             int nlen = (int)String(num).length();
             char sep = (i + nlen < (int)text.length()) ? text[i + nlen] : ' ';
             if (sep == 'h' || sep == 'H' || sep == ':') {
-                t.tm_hour = num;
-                t.tm_min  = 0;
-                t.tm_sec  = 0;
+                t.tm_hour = num; t.tm_min = 0; t.tm_sec = 0;
                 int j = i + nlen + 1;
                 if (j < (int)text.length() && isDigit(text[j]))
                     t.tm_min = text.substring(j).toInt();
                 if (demain) t.tm_mday += 1;
                 time_t target = mktime(&t);
-                if (!demain && target <= now) {
-                    t.tm_mday += 1;
-                    target = mktime(&t);
-                }
+                if (!demain && target <= now) { t.tm_mday += 1; target = mktime(&t); }
                 return target;
             }
         }
     }
-
     return now + 3600;
 }
 
-// ── Extraire le label du rappel ──────────────────────────────────────────
+// fix: \\xNN → \xNN (double-escape causait "hex escape out of range")
 static String _extract_label(const String& raw) {
     String t = raw;
     const char* prefixes[] = {
@@ -104,10 +94,8 @@ static void _add_bubble(const char* text, bool is_user) {
     lv_obj_set_style_radius(bubble, 12, 0);
     lv_obj_set_style_border_width(bubble, 0, 0);
     lv_obj_set_style_pad_all(bubble, 10, 0);
-    if (is_user)
-        lv_obj_align(bubble, LV_ALIGN_RIGHT_MID, -4, 0);
-    else
-        lv_obj_align(bubble, LV_ALIGN_LEFT_MID, 4, 0);
+    if (is_user) lv_obj_align(bubble, LV_ALIGN_RIGHT_MID, -4, 0);
+    else         lv_obj_align(bubble, LV_ALIGN_LEFT_MID,   4, 0);
     lv_obj_t* lbl = lv_label_create(bubble);
     lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(lbl, LV_PCT(100));
@@ -184,7 +172,6 @@ void AppNestor::onPause() {
 void AppNestor::handleIntent(const char* intent, const char* param) {
     String text(param);
 
-    // ── Intent create_reminder ────────────────────────────────────────────
     if (strcmp(intent, "create_reminder") == 0 ||
         (strcmp(intent, "free_speech") == 0 && _is_reminder_request(text))) {
 
@@ -206,7 +193,6 @@ void AppNestor::handleIntent(const char* intent, const char* param) {
                      "Rappel cr\xc3\xa9\xc3\xa9 : %s, le %d \xc3\xa0 %02dh%02d.",
                      r.label.c_str(), lt.tm_mday, lt.tm_hour, lt.tm_min);
             _add_bubble(confirm, false);
-            // Fix: voice::speak() → voice_engine_speak()
             voice_engine_speak(confirm);
         } else {
             const char* err = "Je n'ai pas pu cr\xc3\xa9er le rappel.";
@@ -217,14 +203,12 @@ void AppNestor::handleIntent(const char* intent, const char* param) {
         return;
     }
 
-    // ── Intent query / free_speech → Groq LLM ────────────────────────────
     if (strcmp(intent, "query") == 0 || strcmp(intent, "free_speech") == 0) {
         _add_bubble(param, true);
         if (_lbl_status) lv_label_set_text(_lbl_status, "\xe2\x8c\x9b R\xc3\xa9flexion...");
         String reply = HttpClient::chatCompletion(text);
         if (reply.length() > 0) {
             _add_bubble(reply.c_str(), false);
-            // Fix: voice::speak() → voice_engine_speak()
             voice_engine_speak(reply.c_str());
         } else {
             const char* err = "Je n'ai pas pu obtenir de r\xc3\xa9ponse.";
