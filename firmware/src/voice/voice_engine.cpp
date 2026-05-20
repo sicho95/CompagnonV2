@@ -4,13 +4,14 @@
 #include <freertos/task.h>
 #include <freertos/queue.h>
 
-static bool          _silent       = false;
-static bool          _running      = false;
-static bool          _recording    = false;  // fix: flag capture manuelle
-static bool          _wake_detected = false; // fix: flag wake word
-static QueueHandle_t _speak_q      = nullptr;
+static bool          _silent        = false;
+static bool          _running       = false;
+static bool          _recording     = false;
+static bool          _wake_detected = false;
+static QueueHandle_t _speak_q       = nullptr;
 
-#define SPEAK_MAX_LEN 256
+#define SPEAK_MAX_LEN  256
+#define VOICE_STACK    12288   // augmente : Serial.printf + String sur stack
 
 static void _voice_task(void* pvParam) {
     char msg[SPEAK_MAX_LEN];
@@ -18,13 +19,9 @@ static void _voice_task(void* pvParam) {
         if (xQueueReceive(_speak_q, msg, pdMS_TO_TICKS(20)) == pdTRUE) {
             if (!_silent) {
                 Serial.printf("[VOICE] TTS: %s\n", msg);
-                // TODO : appeler hal::audio_play_pcm( HttpClient::textToSpeech(msg) )
             }
         }
-        // TODO : lecture mic ES7210, détection wake word
-        // Remettre _wake_detected = true ici quand wake word détecté
         if (_recording) {
-            // TODO : capturer l'audio et envoyer STT
             _recording = false;
         }
         vTaskDelay(pdMS_TO_TICKS(5));
@@ -33,23 +30,21 @@ static void _voice_task(void* pvParam) {
 
 void voice_engine_init() {
     _speak_q = xQueueCreate(4, SPEAK_MAX_LEN);
-    xTaskCreatePinnedToCore(_voice_task, "voice", 8192, nullptr, 1, nullptr, 0);
+    xTaskCreatePinnedToCore(_voice_task, "voice", VOICE_STACK, nullptr, 1, nullptr, 0);
     _running = true;
     Serial.println("[VOICE] engine init OK (Core 0)");
 }
 
-void voice_engine_set_silent(bool s)      { _silent = s; }
-bool voice_engine_is_listening()          { return _running && !_silent; }
-
-// fix: implémentations des fonctions manquantes
-bool voice_engine_is_silent()             { return _silent; }
-void voice_engine_start_recording()       { _recording = true; Serial.println("[VOICE] recording started"); }
-bool voice_engine_wake_word_detected()    { bool v = _wake_detected; _wake_detected = false; return v; }
+void voice_engine_set_silent(bool s)       { _silent = s; }
+bool voice_engine_is_listening()           { return _running && !_silent; }
+bool voice_engine_is_silent()              { return _silent; }
+void voice_engine_start_recording()        { _recording = true; Serial.println("[VOICE] recording started"); }
+bool voice_engine_wake_word_detected()     { bool v = _wake_detected; _wake_detected = false; return v; }
 
 void voice_engine_speak(const char* text) {
     if (!text || !_speak_q) return;
     char msg[SPEAK_MAX_LEN];
     strncpy(msg, text, SPEAK_MAX_LEN - 1);
     msg[SPEAK_MAX_LEN - 1] = 0;
-    xQueueSend(_speak_q, msg, 0);  // non-bloquant
+    xQueueSend(_speak_q, msg, 0);
 }

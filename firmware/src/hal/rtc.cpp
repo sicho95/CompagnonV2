@@ -1,29 +1,23 @@
 // ============================================================
 // CompagnonV2 — hal/rtc.cpp
 // PCF85063 RTC — boot offline, sync NTP/BLE
-// Stratégie heure :
-//   Boot → lire PCF85063 → settimeofday (valide même sans WiFi)
-//   WiFi up → NTP → réécrire PCF85063
-//   BLE SET_TIME → réécrire PCF85063 (réglage manuel / premier boot)
+// fix: static SensorPCF85063 _rtc global remplace par pointeur
+//      Le constructeur global s'executait avant Wire.begin() -> crash
 // ============================================================
 #include "rtc.h"
 #include "../../include/pins.h"
 #include <Wire.h>
 #include <sys/time.h>
-
-// SensorLib PCF85063 (XPowersLib ou SensorLib selon board package)
 #include <SensorPCF85063.hpp>
 
 namespace hal {
 
-static SensorPCF85063 _rtc;
-static bool _rtc_ok    = false;
-static bool _rtc_valid = false; // false si jamais synchronisé (epoch < 2020)
+static SensorPCF85063* _rtc      = nullptr;
+static bool            _rtc_ok   = false;
+static bool            _rtc_valid = false;
 
-// Epoch minimal considéré comme valide : 2020-01-01 00:00:00 UTC
 #define EPOCH_MIN_VALID 1577836800UL
 
-// fix: timegm() absent sur ESP32 — implémentation UTC manuelle
 static time_t _timegm_utc(struct tm* t) {
     const char* tz = getenv("TZ");
     setenv("TZ", "UTC0", 1);
@@ -38,8 +32,12 @@ static time_t _timegm_utc(struct tm* t) {
 bool rtc_init() {
     setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
     tzset();
-    if (!_rtc.begin(Wire, PIN_IIC_SDA, PIN_IIC_SCL)) {
+
+    _rtc = new SensorPCF85063();
+    if (!_rtc->begin(Wire, PIN_IIC_SDA, PIN_IIC_SCL)) {
         Serial.println("[RTC] PCF85063 NOT found on I2C");
+        delete _rtc;
+        _rtc = nullptr;
         return false;
     }
     _rtc_ok = true;
@@ -50,30 +48,29 @@ bool rtc_init() {
     return true;
 }
 
-bool rtc_is_valid() {
-    return _rtc_ok && _rtc_valid;
-}
+bool rtc_is_valid() { return _rtc_ok && _rtc_valid; }
 
 void rtc_apply_to_system() {
-    if (!_rtc_ok) return;
+    if (!_rtc_ok || !_rtc) return;
     time_t ep = rtc_get_epoch();
     if (ep < EPOCH_MIN_VALID) {
-        Serial.println("[RTC] Heure invalide — system time non appliqué");
+        Serial.println("[RTC] Heure invalide — system time non applique");
         return;
     }
     struct timeval tv = { .tv_sec = ep, .tv_usec = 0 };
     settimeofday(&tv, NULL);
     struct tm t;
     localtime_r(&ep, &t);
-    Serial.printf("[RTC] System time set from RTC: %04d-%02d-%02d %02d:%02d:%02d (local)\n",
+    Serial.printf("[RTC] System time set: %04d-%02d-%02d %02d:%02d:%02d (local)\n",
         t.tm_year+1900, t.tm_mon+1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
 }
 
 static void _write_rtc(time_t epoch) {
+    if (!_rtc) return;
     struct tm t;
     gmtime_r(&epoch, &t);
-    _rtc.setDateTime(t.tm_year+1900, t.tm_mon+1, t.tm_mday,
-                     t.tm_hour, t.tm_min, t.tm_sec);
+    _rtc->setDateTime(t.tm_year+1900, t.tm_mon+1, t.tm_mday,
+                      t.tm_hour, t.tm_min, t.tm_sec);
     struct timeval tv = { .tv_sec = epoch, .tv_usec = 0 };
     settimeofday(&tv, NULL);
     _rtc_valid = true;
@@ -94,10 +91,9 @@ void rtc_sync_from_pwa(time_t epoch) {
 }
 
 time_t rtc_get_epoch() {
-    if (!_rtc_ok) return 0;
-    RTC_DateTime dt = _rtc.getDateTime();
+    if (!_rtc_ok || !_rtc) return 0;
+    RTC_DateTime dt = _rtc->getDateTime();
     struct tm t = {};
-    // fix: SensorLib 0.4.1 — membres privés, utiliser les getters
     t.tm_year  = dt.getYear()  - 1900;
     t.tm_mon   = dt.getMonth() - 1;
     t.tm_mday  = dt.getDay();
@@ -116,17 +112,17 @@ struct tm rtc_get_local_time() {
 }
 
 void rtc_set_alarm(time_t epoch) {
-    if (!_rtc_ok) return;
+    if (!_rtc_ok || !_rtc) return;
     struct tm t; gmtime_r(&epoch, &t);
-    _rtc.setAlarm(t.tm_hour, t.tm_min, 0, t.tm_mday, 0xFF);
-    _rtc.enableAlarm();
+    _rtc->setAlarm(t.tm_hour, t.tm_min, 0, t.tm_mday, 0xFF);
+    _rtc->enableAlarm();
     Serial.printf("[RTC] Alarm set: %02d/%02d %02d:%02d UTC\n",
         t.tm_mday, t.tm_mon+1, t.tm_hour, t.tm_min);
 }
 
 void rtc_clear_alarm() {
-    if (!_rtc_ok) return;
-    _rtc.disableAlarm();
+    if (!_rtc_ok || !_rtc) return;
+    _rtc->disableAlarm();
 }
 
 } // namespace hal
