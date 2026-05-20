@@ -2,19 +2,14 @@
 /*
  * config/nvs_config.h — Gestion NVS CompagnonV2
  *
- * Fix 1 : #include <Arduino.h> en tête pour size_t + String
- *
- * Namespace : "compagnon"
- * Toutes les clés NVS sont <= 15 caractères (limite ESP-IDF).
+ * NOMS RESERVES IDF (ne pas utiliser comme noms de fonctions) :
+ *   nvs_set_u8, nvs_get_u8, nvs_set_str, nvs_get_str
+ *   -> renommes en cfg_set_u8, cfg_get_u8, cfg_set_str, cfg_get_str
  */
-#include <Arduino.h>   // size_t, String, uint8_t — Fix 1
+#include <Arduino.h>
 #include <stdbool.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-// ── Clés API ──────────────────────────────────────────────────────────────
+// ── Clés API ────────────────────────────────────────────────────────────────────────
 #define NVS_KEY_GROQ        "groq_key"
 #define NVS_KEY_GEMINI      "gemini_key"
 #define NVS_KEY_SERPER      "serper_key"
@@ -28,7 +23,7 @@ extern "C" {
 #define NVS_KEY_ECOVACS_U   "ecovacs_u"
 #define NVS_KEY_ECOVACS_P   "ecovacs_p"
 
-// ── Paramètres OS (configurables depuis PWA) ──────────────────────────────
+// ── Paramètres OS ──────────────────────────────────────────────────────────────────
 #define NVS_KEY_BLE_NAME    "ble_name"
 #define NVS_KEY_WAKE_WORD   "wake_word"
 #define NVS_KEY_SILENT      "silent_mode"
@@ -43,11 +38,9 @@ void    nvs_list_api_keys_json(char *out, size_t out_len);
 
 bool    nvs_set_bool(const char *key, bool value);
 bool    nvs_get_bool(const char *key, bool default_val);
-bool    nvs_set_u8(const char *key, uint8_t value);
-uint8_t nvs_get_u8(const char *key, uint8_t default_val);
-bool    nvs_set_str(const char *key, const char *value);
-bool    nvs_get_str(const char *key, char *out, size_t out_len, const char *default_val);
 
-#ifdef __cplusplus
-}
-#endif
+// Renommes pour eviter conflit avec IDF nvs.h
+bool    cfg_set_u8(const char *key, uint8_t value);
+uint8_t cfg_get_u8(const char *key, uint8_t default_val);
+bool    cfg_set_str(const char *key, const char *value);
+bool    cfg_get_str(const char *key, char *out, size_t out_len, const char *default_val);
