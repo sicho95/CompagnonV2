@@ -1,98 +1,98 @@
 // ============================================================
 // CompagnonV2 — system/wifi_mgr.cpp
-// fix: WiFi init dans une tache FreeRTOS (post-scheduler)
+// fix DEFINITIF : WiFi appele exclusivement depuis loop()
 //
-// WiFi.mode() / WiFi.begin() utilisent des semaphores internes
-// crees par la tache wifi esp-idf. Si appeles depuis setup()
-// avant que FreeRTOS ait schedule cette tache, on obtient :
-//   assert xQueueSemaphoreTake (pxQueue==NULL) → crash/reboot
+// WiFi.mode()/WiFi.begin() ne sont PAS thread-safe depuis une
+// tache FreeRTOS custom. Le seul contexte sur sur ESP32-Arduino
+// est loop() (Core 1, contexte Arduino natif).
 //
-// Solution : on lance une tache one-shot qui attend 500ms
-// (le temps que le scheduler demarre toutes les taches systeme)
-// puis execute la connexion WiFi normalement.
+// wifi_mgr_init() : ne touche PAS au WiFi, pose juste un flag.
+// wifi_mgr_tick() : appele depuis loop(), execute WiFi.begin()
+//   la premiere fois apres WIFI_BOOT_DELAY_MS de boot pour laisser
+//   le reste de setup() se terminer proprement.
 // ============================================================
 #include "wifi_mgr.h"
 #include <WiFi.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 
 #define WIFI_NAMESPACE      "wifi_mgr"
 #define MAX_NETWORKS        5
 #define CONNECT_TIMEOUT_MS  10000
-#define WIFI_INIT_DELAY_MS  500   // laisse FreeRTOS scheduler la tache wifi esp-idf
+#define WIFI_BOOT_DELAY_MS  1500   // attend que loop() tourne depuis 1.5s
 
-static Preferences   _prefs;
-static bool          _initialized   = false;
-static int           _network_count = 0;
-static int           _current_idx   = -1;
-static unsigned long _connect_start = 0;
-static bool          _wifi_ready    = false;  // true une fois la tache init terminee
+static bool          _initialized    = false;
+static bool          _wifi_started   = false;  // premier WiFi.begin() fait
+static int           _network_count  = 0;
+static int           _current_idx    = -1;
+static unsigned long _connect_start  = 0;
 
 struct SavedNetwork { String ssid; String pwd; };
 static SavedNetwork _networks[MAX_NETWORKS];
 
 static void _load_networks() {
-    _prefs.begin(WIFI_NAMESPACE, true);
-    _network_count = _prefs.getInt("count", 0);
+    Preferences prefs;
+    prefs.begin(WIFI_NAMESPACE, true);
+    _network_count = prefs.getInt("count", 0);
     if (_network_count > MAX_NETWORKS) _network_count = MAX_NETWORKS;
     for (int i = 0; i < _network_count; i++) {
         char ks[12], kp[12];
         snprintf(ks, sizeof(ks), "ssid%d", i);
         snprintf(kp, sizeof(kp), "pwd%d",  i);
-        _networks[i].ssid = _prefs.getString(ks, "");
-        _networks[i].pwd  = _prefs.getString(kp, "");
+        _networks[i].ssid = prefs.getString(ks, "");
+        _networks[i].pwd  = prefs.getString(kp, "");
     }
-    _prefs.end();
+    prefs.end();
 }
 
 static void _save_networks() {
-    _prefs.begin(WIFI_NAMESPACE, false);
-    _prefs.putInt("count", _network_count);
+    Preferences prefs;
+    prefs.begin(WIFI_NAMESPACE, false);
+    prefs.putInt("count", _network_count);
     for (int i = 0; i < _network_count; i++) {
         char ks[12], kp[12];
         snprintf(ks, sizeof(ks), "ssid%d", i);
         snprintf(kp, sizeof(kp), "pwd%d",  i);
-        _prefs.putString(ks, _networks[i].ssid);
-        _prefs.putString(kp, _networks[i].pwd);
+        prefs.putString(ks, _networks[i].ssid);
+        prefs.putString(kp, _networks[i].pwd);
     }
-    _prefs.end();
+    prefs.end();
 }
 
+// Appele UNIQUEMENT depuis wifi_mgr_tick() (contexte loop())
 static void _begin_connect(int idx) {
     if (idx < 0 || idx >= _network_count) { _current_idx = -1; return; }
     if (_networks[idx].ssid.isEmpty())    { _current_idx = -1; return; }
     WiFi.mode(WIFI_STA);
     WiFi.disconnect(false);
     WiFi.begin(_networks[idx].ssid.c_str(), _networks[idx].pwd.c_str());
-    _current_idx   = idx;
+    _current_idx  = idx;
     _connect_start = millis();
     Serial.printf("[WIFI] Connecting to %s...\n", _networks[idx].ssid.c_str());
 }
 
-// Tache one-shot : attend que FreeRTOS soit stable, puis lance le WiFi
-static void _wifi_init_task(void* pvParam) {
-    vTaskDelay(pdMS_TO_TICKS(WIFI_INIT_DELAY_MS));  // laisse le scheduler demarrer
-    Serial.println("[WIFI] init task started");
-    _wifi_ready = true;
-    if (_network_count > 0) _begin_connect(0);
-    vTaskDelete(nullptr);  // tache one-shot : se supprime elle-meme
-}
-
 void wifi_mgr_init() {
+    // NE PAS appeler WiFi ici — on est encore dans setup()
+    // wifi_mgr_tick() s'en chargera depuis loop()
     _load_networks();
     _initialized = true;
-    // Lance la tache d'init : NE PAS appeler WiFi ici (trop tot dans setup)
-    xTaskCreatePinnedToCore(
-        _wifi_init_task, "wifi_init", 4096, nullptr, 1, nullptr, 1
-    );
-    Serial.println("[WIFI] init scheduled (task +500ms)");
+    Serial.println("[WIFI] init OK (connexion differee dans loop)");
 }
 
 void wifi_mgr_tick() {
-    if (!_initialized || !_wifi_ready) return;
+    if (!_initialized) return;
 
+    // Attendre WIFI_BOOT_DELAY_MS depuis le debut du boot
+    // pour etre certain que setup() est termine et que loop() tourne
+    if (!_wifi_started) {
+        if (millis() < WIFI_BOOT_DELAY_MS) return;
+        _wifi_started = true;
+        if (_network_count > 0) _begin_connect(0);
+        else Serial.println("[WIFI] Aucun reseau configure");
+        return;
+    }
+
+    // Connexion reussie
     if (WiFi.status() == WL_CONNECTED) {
         if (_current_idx >= 0) {
             Serial.printf("[WIFI] Connected: %s  IP=%s\n",
@@ -130,7 +130,8 @@ void wifi_mgr_provision(const char* ssid, const char* pwd) {
         if (_networks[i].ssid == ssid) {
             _networks[i].pwd = pwd ? pwd : "";
             _save_networks();
-            if (_wifi_ready) _begin_connect(i);
+            // Reconnexion immediate seulement si on est dans loop()
+            if (_wifi_started) _begin_connect(i);
             return;
         }
     }
@@ -139,7 +140,7 @@ void wifi_mgr_provision(const char* ssid, const char* pwd) {
     _networks[slot].pwd  = pwd ? pwd : "";
     _save_networks();
     Serial.printf("[WIFI] Provisioned: %s\n", ssid);
-    if (_wifi_ready) _begin_connect(slot);
+    if (_wifi_started) _begin_connect(slot);
 }
 
 void wifi_mgr_remove_network(const char* ssid) {
