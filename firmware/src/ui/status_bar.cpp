@@ -5,6 +5,11 @@
 static lv_obj_t* _bar = nullptr;
 
 void ui_status_bar_init() {
+    // Guard : lv_layer_top() est sûr seulement si LVGL a un display enregistré
+    if (lv_display_get_default() == nullptr) {
+        Serial.println("[UI] status_bar init SKIP — aucun display LVGL enregistre");
+        return;
+    }
     _bar = lv_obj_create(lv_layer_top());
     lv_obj_set_size(_bar, LV_HOR_RES, 24);
     lv_obj_set_pos(_bar, 0, 0);

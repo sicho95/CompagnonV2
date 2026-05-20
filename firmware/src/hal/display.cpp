@@ -1,6 +1,8 @@
 // ============================================================
 // CompagnonV2 — display.cpp
 // CO5300 AMOLED QSPI
+// fix: lv_display_create() appelé dans display_init() pour que
+//      _disp ne soit plus nullptr → lv_layer_top() safe dans UI
 // ============================================================
 #include "display.h"
 #include "../../include/pins.h"
@@ -9,6 +11,12 @@
 namespace hal {
 
 static lv_display_t* _disp = nullptr;
+
+// Flush no-op : sera remplacée par le vrai driver CO5300 QSPI
+static void _flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
+    (void)area; (void)px_map;
+    lv_display_flush_ready(disp);
+}
 
 bool display_init() {
     if (PIN_LCD_RST >= 0) {
@@ -21,11 +29,13 @@ bool display_init() {
     pinMode(PIN_LCD_CS, OUTPUT);
     digitalWrite(PIN_LCD_CS, HIGH);
 
-    // TODO: init SPI QSPI réelle (Arduino_GFX / driver CO5300)
-    // _disp = lv_display_create(536, 240);
-    // lv_display_set_flush_cb(_disp, display_flush_cb);
+    // Crée le display LVGL (résolution CO5300 : 536×240)
+    // Le flush est un no-op jusqu'à ce que le vrai driver QSPI soit implanté
+    lv_init();
+    _disp = lv_display_create(536, 240);
+    lv_display_set_flush_cb(_disp, _flush_cb);
 
-    Serial.printf("[DISPLAY] CO5300 QSPI init placeholder\n"
+    Serial.printf("[DISPLAY] CO5300 QSPI — LVGL display enregistre (536x240 stub)\n"
                   "  CS=%d SCL=%d SIO0=%d SI1=%d SI2=%d SI3=%d RST=%d\n",
                   PIN_LCD_CS, PIN_LCD_SCLK, PIN_LCD_SIO0,
                   PIN_LCD_SI1, PIN_LCD_SI2, PIN_LCD_SI3, PIN_LCD_RST);
