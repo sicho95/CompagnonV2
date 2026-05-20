@@ -1,9 +1,8 @@
 // ============================================================
 // CompagnonV2 — display.cpp
 // CO5300 AMOLED QSPI
-// fix: ne pas appeler lv_init() (LVGL 9.x s'auto-initialise)
-//      ajouter lv_display_set_buffers() — sans buffer LVGL crashe
-//      dans lv_task_handler() (accès buffer null en loop)
+// lv_init() est appelé dans le .ino avant hal_display_init()
+// Ce fichier ne fait QUE lv_display_create() + buffers
 // ============================================================
 #include "display.h"
 #include "../../include/pins.h"
@@ -13,10 +12,10 @@ namespace hal {
 
 static lv_display_t* _disp = nullptr;
 
-// Double draw buffer statique (10 lignes × 536px × 2 octets/px)
-#define DISP_W   536
-#define DISP_H   240
-#define BUF_LINES 10
+// Double draw buffer statique (10 lignes x 536px x 2 octets/px = ~10KB chacun)
+#define DISP_W    536
+#define DISP_H    240
+#define BUF_LINES  10
 static lv_color_t _buf1[DISP_W * BUF_LINES];
 static lv_color_t _buf2[DISP_W * BUF_LINES];
 
@@ -37,8 +36,7 @@ bool display_init() {
     pinMode(PIN_LCD_CS, OUTPUT);
     digitalWrite(PIN_LCD_CS, HIGH);
 
-    // LVGL 9.x : NE PAS appeler lv_init() ici — il s'auto-initialise
-    // Créer le display et lui affecter des buffers valides
+    // lv_init() déjà appelé dans setup() — on crée directement le display
     _disp = lv_display_create(DISP_W, DISP_H);
     lv_display_set_flush_cb(_disp, _flush_cb);
     lv_display_set_buffers(_disp, _buf1, _buf2,
@@ -56,14 +54,10 @@ lv_display_t* display_get() {
 }
 
 void display_flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2, const uint16_t* data) {
-    // TODO: implémenter flush LVGL → CO5300 QSPI
     (void)x1; (void)y1; (void)x2; (void)y2; (void)data;
 }
 
-void display_set_brightness(uint8_t pct) {
-    (void)pct;
-}
-
+void display_set_brightness(uint8_t pct) { (void)pct; }
 void display_sleep()   { /* TODO */ }
 void display_wakeup()  { /* TODO */ }
 

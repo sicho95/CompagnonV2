@@ -1,23 +1,23 @@
 /*
  * CompagnonV2 — ESP32-S3 Waveshare AMOLED 2.16"
  * Framework : Arduino 3.3.8 / arduino-esp32
- * LVGL      : 9.x
+ * LVGL      : 9.x  (inclus comme <lvgl.h> raw — lv_init() OBLIGATOIRE)
  * Board     : Waveshare ESP32-S3-Touch-AMOLED-2.16 (CO5300 + CST9220 + QMI8658 + AXP2101)
  *
  * Ordre d'init critique :
- *  1. PMU       — rails ALDO1/ALDO3, bouton power
- *  2. NVS       — namespace "compagnon"
- *  3. Display   — reset hw pin 2 (partagé touch)
- *  4. Touch     — 500 ms post-reset, CST9220
- *  5. IMU       — QMI8658 orientation
- *  6. Audio     — I2S mic + codec (init silencieux)
- *  7. SD        — optionnel
- *  8. UI        — status_bar (lv_layer_top) + launcher
- *  9. Net       — wifi_mgr + BLE + OTA
- * 10. Voice     — wake word listener (Core 0)
- * 11. Reminder  — scheduler
- * 12. Orchestrateur
- * 13. Callback power → menu UI
+ *  0. lv_init()  — DOIT être le tout premier appel LVGL
+ *  1. PMU        — rails ALDO1/ALDO3, bouton power
+ *  2. NVS        — namespace "compagnon"
+ *  3. Display    — lv_display_create() + buffers (apres lv_init !)
+ *  4. Touch      — 500 ms post-reset, CST9220
+ *  5. IMU        — QMI8658 orientation
+ *  6. Audio      — I2S mic + codec (init silencieux)
+ *  7. UI         — status_bar (lv_layer_top) + launcher
+ *  8. Net        — wifi_mgr + BLE + OTA
+ *  9. Voice      — wake word listener (Core 0)
+ * 10. Reminder   — scheduler
+ * 11. Orchestrateur
+ * 12. Callback power → menu UI
  */
 
 #include <lvgl.h>
@@ -28,7 +28,7 @@
 #include "src/hal/pmu.h"
 #include "src/hal/audio.h"
 #include "src/system/orchestrator.h"
-#include "src/system/wifi_mgr.h"    // wifi_mgr est dans system/, pas net/
+#include "src/system/wifi_mgr.h"
 #include "src/system/power_mgr.h"
 #include "src/net/ota.h"
 #include "src/net/ble_mgr.h"
@@ -42,7 +42,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
-// ─── Mapping noms longs PWA → clés NVS courtes (≤ 15 chars) ──────────────────
+// ─── Mapping noms longs PWA → clés NVS courtes (≤ 15 chars) ────────────────
 struct KeyMapping { const char *pwa_name; const char *nvs_name; };
 static const KeyMapping KEY_MAP[] = {
     { "GROQ_API_KEY",           NVS_KEY_GROQ        },
@@ -82,7 +82,7 @@ static const char *resolve_nvs_key(const char *pwa_key) {
     return nullptr;
 }
 
-// ─── Pont BLE → WiFi provisioning ────────────────────────────────────────────
+// ─── Pont BLE → WiFi provisioning ──────────────────────────────────────
 static void ble_wifi_prov_cb(const char *json) {
     if (!json) return;
     JsonDocument doc;
@@ -99,7 +99,7 @@ static void ble_wifi_prov_cb(const char *json) {
     ble_mgr_notify_agent_sync(ack);
 }
 
-// ─── Pont BLE → Agent Sync ───────────────────────────────────────────────────
+// ─── Pont BLE → Agent Sync ───────────────────────────────────────────
 static void ble_agent_sync_cb(const char *json) {
     if (!json) return;
     JsonDocument doc;
@@ -199,15 +199,22 @@ static void ble_agent_sync_cb(const char *json) {
     Serial.printf("[BLE/AGENT] cmd inconnue: %s\n", cmd);
 }
 
-// ─── Setup ───────────────────────────────────────────────────────────────────
+// ─── Setup ─────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
     delay(200);
     Serial.println("\n[BOOT] CompagnonV2 — demarrage");
 
+    // ── 0. LVGL init — OBLIGATOIRE en tout premier avec <lvgl.h> raw ─────────────
+    // Contrairement au wrapper LVGL.h (Arduino), <lvgl.h> n'appelle pas
+    // lv_init() automatiquement. Sans cet appel, lv_display_create()
+    // crashe sur l'offset 0x14 (champ interne non initialisé) → LoadProhibited.
+    lv_init();
+    Serial.println("[BOOT] LVGL init OK");
+
     hal_pmu_init();
     nvs_config_init();
-    hal_display_init();
+    hal_display_init();   // lv_display_create() + buffers — sûr après lv_init()
     hal_touch_init();
     hal_imu_init();
     hal_audio_init();
@@ -229,9 +236,11 @@ void setup() {
     Serial.println("[BOOT] Pret.");
 }
 
-// ─── Loop (Core 1) ───────────────────────────────────────────────────────────
+// ─── Loop (Core 1) ─────────────────────────────────────────────────────────
 void loop() {
-    lv_task_handler();   // LVGL 9.x : remplace lv_timer_handler()
+    lv_tick_inc(1);      // avance le timer interne LVGL de 1ms — OBLIGATOIRE
+    lv_task_handler();   // traite les événements et renders LVGL
+
     hal_pmu_tick();
     wifi_mgr_tick();
     net_ota_tick();
