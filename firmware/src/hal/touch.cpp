@@ -1,9 +1,13 @@
 // ============================================================
 // CompagnonV2 — touch.cpp
 // CST9220 I2C touch controller
-// TP_INT=GPIO11, TP_RST=GPIO40 (corrigé schéma)
+// TP_INT=GPIO11, TP_RST=GPIO40
+// fix: supprimer Wire.begin() redondant — Wire est déjà initialisé
+//      par pmu.begin() (XPowersLib) dans hal_pmu_init() qui s'exécute
+//      en premier dans setup(). Double Wire.begin() génère le warning
+//      "Bus already started in Master Mode".
 // ============================================================
-#include <Arduino.h>        // fix: Serial, pinMode, digitalWrite, delay
+#include <Arduino.h>
 #include "touch.h"
 #include "../../include/pins.h"
 #include <Wire.h>
@@ -28,7 +32,7 @@ bool touch_init() {
 
     pinMode(PIN_TP_INT, INPUT);
 
-    Wire.begin(PIN_IIC_SDA, PIN_IIC_SCL);
+    // Wire déjà initialisé par pmu.begin() — pas de Wire.begin() ici
     Wire.beginTransmission(CST9220_ADDR);
     if (Wire.endTransmission() != 0) {
         Serial.println("[TOUCH] CST9220 not found on I2C 0x1A");

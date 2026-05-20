@@ -3,6 +3,9 @@
 // ES7210 (0x40) I2S_NUM_1 RX capture mic TDM
 // ES8311 (0x18) I2S_NUM_0 TX DAC playback TTS
 // NS4150B PA_EN=GPIO46
+// fix: supprimer Wire.begin() redondant — Wire est déjà initialisé
+//      par pmu.begin() (XPowersLib). Double Wire.begin() génère le
+//      warning "Bus already started in Master Mode".
 // ============================================================
 #include "hal_audio.h"
 #include "drivers/es7210.h"
@@ -109,7 +112,7 @@ bool audio_init() {
     if (_initialized) return true;
     pinMode(PIN_SPK_PA_EN, OUTPUT);
     _pa_enable(false);
-    Wire.begin(PIN_IIC_SDA, PIN_IIC_SCL);
+    // Wire déjà initialisé par pmu.begin() — pas de Wire.begin() ici
 
     bool es8311_ok = es8311_init(AUDIO_TTS_RATE);
     if (!es8311_ok) Serial.println("[HAL_AUDIO] ES8311 absent");
