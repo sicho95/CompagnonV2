@@ -9,7 +9,7 @@
 // ============================================================
 #include <Arduino.h>
 #include <SPI.h>
-#include "../../include/pins.h"
+#include "../../../include/pins.h"
 
 namespace co5300 {
 
