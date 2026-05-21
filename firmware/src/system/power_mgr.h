@@ -1,15 +1,6 @@
 #pragma once
-// ============================================================
-// Gestionnaire veille / deep-sleep CompagnonV2
-// ============================================================
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 void power_mgr_init();
 void power_mgr_tick();
 void power_mgr_request_sleep();
-
-#ifdef __cplusplus
-}
-#endif
+void power_mgr_activity();   // appeler à chaque interaction UI/touch
