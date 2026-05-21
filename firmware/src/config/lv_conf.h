@@ -1,6 +1,11 @@
 /**
  * lv_conf.h — LVGL 9 config CompagnonV2
- * Ecran : CO5300, 480x480, RGB565
+ * Ecran : CO5300 AMOLED QSPI, 466x466 (zone active), RGB565
+ *
+ * IMPORTANT tick :
+ *   LV_TICK_CUSTOM 1 → LVGL lit millis() automatiquement.
+ *   NE PAS appeler lv_tick_inc() dans loop() sous peine de double-comptage
+ *   qui empêche LVGL de redessiner quoi que ce soit.
  */
 #ifndef LV_CONF_H
 #define LV_CONF_H
@@ -21,6 +26,7 @@
 #define LV_FONT_MONTSERRAT_24 1
 #define LV_FONT_DEFAULT       &lv_font_montserrat_16
 
+// LVGL lit millis() directement — NE PAS appeler lv_tick_inc() dans loop()
 #define LV_TICK_CUSTOM 1
 #define LV_TICK_CUSTOM_INCLUDE <Arduino.h>
 #define LV_TICK_CUSTOM_SYS_TIME_EXPR (millis())
@@ -46,8 +52,10 @@
 #define LV_USE_THEME_DEFAULT 1
 #define LV_THEME_DEFAULT_DARK 1
 
-#define LV_HOR_RES_MAX 480
-#define LV_VER_RES_MAX 480
+// Résolution de la zone active CO5300 (panel physique 480x480, zone utile 466x466)
+// lv_display_create() est appelé avec 466x466 dans display.cpp
+#define LV_HOR_RES_MAX 466
+#define LV_VER_RES_MAX 466
 #define LV_DISPLAY_ROTATION LV_DISPLAY_ROTATION_0
 
 #endif

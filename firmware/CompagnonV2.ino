@@ -18,6 +18,11 @@
  * 10. Reminder   — scheduler
  * 11. Orchestrateur
  * 12. Callback power → menu UI
+ *
+ * NOTE LVGL tick :
+ *  LV_TICK_CUSTOM 1 dans lv_conf.h → LVGL lit millis() directement.
+ *  NE PAS appeler lv_tick_inc() dans loop() — ce serait un double-comptage
+ *  qui empêche LVGL de redessiner (scheduler croit que rien n'a changé).
  */
 
 #include <lvgl.h>
@@ -205,15 +210,12 @@ void setup() {
     delay(200);
     Serial.println("\n[BOOT] CompagnonV2 — demarrage");
 
-    // ── 0. LVGL init — UNE SEULE FOIS, tout premier appel LVGL ──────────────
-    // <lvgl.h> raw n'appelle pas lv_init() automatiquement.
-    // os_main.cpp NE doit plus appeler lv_init() (guard supprimé).
     lv_init();
     Serial.println("[BOOT] LVGL init OK");
 
     hal_pmu_init();
     nvs_config_init();
-    hal_display_init();   // lv_display_create() + buffers PSRAM — sûr après lv_init()
+    hal_display_init();
     hal_touch_init();
     hal_imu_init();
     hal_audio_init();
@@ -237,8 +239,10 @@ void setup() {
 
 // ─── Loop (Core 1) ─────────────────────────────────────────────────────────
 void loop() {
-    lv_tick_inc(1);        // avance le timer interne LVGL de 1ms — OBLIGATOIRE
-    lv_timer_handler();    // fix: lv_task_handler() n'existe plus en LVGL 9.x
+    // NE PAS appeler lv_tick_inc() ici :
+    // LV_TICK_CUSTOM 1 dans lv_conf.h fait lire millis() directement par LVGL.
+    // Appeler lv_tick_inc() en plus causerait un double-comptage qui bloque le rendu.
+    lv_timer_handler();
 
     hal_pmu_tick();
     wifi_mgr_tick();
