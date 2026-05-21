@@ -61,6 +61,7 @@ void flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
     _gfx->draw16bitRGBBitmap(x1, y1, (uint16_t*)color_map, w, h);
 }
 
-Arduino_GFX* gfx() { return _gfx; }
+// Retourne le type concret Arduino_CO5300* pour accéder à setBrightness()
+Arduino_CO5300* gfx() { return _gfx; }
 
 } // namespace co5300
