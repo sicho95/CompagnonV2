@@ -51,11 +51,13 @@ bool touch_init() {
 bool touch_read(uint16_t &x, uint16_t &y) {
 #if __has_include("TouchDrv.hpp")
     if (!_touch_ok) return false;
-    int16_t tx[1], ty[1];
-    // getTouchPoints() = API v0.4+ (getPoint() deprecated)
-    if (_touch.getTouchPoints(tx, ty, 1) == 0) return false;
-    x = (uint16_t)tx[0];
-    y = (uint16_t)ty[0];
+
+    // SensorLib 0.4.1 : getTouchPoints() sans argument, retourne const TouchPoints&
+    const TouchPoints &pts = _touch.getTouchPoints();
+    if (pts.points == 0) return false;
+
+    x = (uint16_t)pts.coordinates[0].x;
+    y = (uint16_t)pts.coordinates[0].y;
     return true;
 #else
     return false;
