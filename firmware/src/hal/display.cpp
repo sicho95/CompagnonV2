@@ -1,6 +1,6 @@
 // ============================================================
-// CompagnonV2 — display.cpp
-// CO5300 AMOLED QSPI — driver réel
+// CompagnonV2 — hal/display.cpp
+// CO5300 AMOLED QSPI — 480x480
 // ============================================================
 #include "display.h"
 #include "drivers/co5300.h"
@@ -11,15 +11,13 @@ namespace hal {
 
 static lv_display_t* _disp = nullptr;
 
-#define DISP_W    536
-#define DISP_H    240
-#define BUF_LINES  20
+#define DISP_W   LCD_WIDTH
+#define DISP_H   LCD_HEIGHT
+#define BUF_LINES 20
 
-// Buffers en PSRAM si dispo, sinon IRAM
 static lv_color_t _buf1[DISP_W * BUF_LINES];
 static lv_color_t _buf2[DISP_W * BUF_LINES];
 
-// Callback LVGL → CO5300
 static void _flush_cb(lv_display_t* disp,
                       const lv_area_t* area,
                       uint8_t* px_map) {
@@ -37,13 +35,14 @@ bool display_init() {
                            sizeof(_buf1),
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
-    Serial.printf("[DISPLAY] CO5300 QSPI — driver OK (536x240)\n"
+    Serial.printf("[DISPLAY] CO5300 QSPI — driver OK (%dx%d)\n"
                   "  CS=%d SCK=%d D0=%d D1=%d D2=%d D3=%d RST=%d\n",
+                  DISP_W, DISP_H,
                   PIN_LCD_CS, PIN_LCD_SCLK,
                   PIN_LCD_SIO0, PIN_LCD_SI1,
                   PIN_LCD_SI2, PIN_LCD_SI3,
                   PIN_LCD_RST);
-    return true;
+    return (_disp != nullptr);
 }
 
 lv_display_t* display_get()  { return _disp; }
@@ -54,8 +53,10 @@ void display_flush(int32_t x1, int32_t y1,
     co5300::flush(x1, y1, x2, y2, data);
 }
 
-void display_set_brightness(uint8_t pct) { (void)pct; /* géré par PMU */ }
-void display_sleep()   { co5300::_cmd(0x10); } // SLPIN
-void display_wakeup()  { co5300::_cmd(0x11); delay(120); } // SLPOUT
+void display_set_brightness(uint8_t pct) {
+    if (co5300::gfx()) co5300::gfx()->setBrightness(pct * 255 / 100);
+}
+void display_sleep()  { co5300::_cmd(0x10); }
+void display_wakeup() { co5300::_cmd(0x11); delay(120); }
 
 } // namespace hal

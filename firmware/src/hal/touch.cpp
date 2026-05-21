@@ -1,64 +1,63 @@
 // ============================================================
-// CompagnonV2 — touch.cpp
-// CST9220 I2C touch controller
-// TP_INT=GPIO11, TP_RST=GPIO40
-// fix: supprimer Wire.begin() redondant — Wire est déjà initialisé
-//      par pmu.begin() (XPowersLib) dans hal_pmu_init() qui s'exécute
-//      en premier dans setup(). Double Wire.begin() génère le warning
-//      "Bus already started in Master Mode".
+// CompagnonV2 — hal/touch.cpp
+// CST9220 via SensorLib TouchDrvCST92xx
+// TP_INT=GPIO11  TP_RST=GPIO2 (partagé avec LCD_RST)
+// Adresse SensorLib : 0x5A
+// Référence : Waveshare examples/Arduino-v3.3.5/05_LVGL_Widgets
 // ============================================================
 #include <Arduino.h>
 #include "touch.h"
 #include "../../include/pins.h"
 #include <Wire.h>
 
-#define CST9220_ADDR  0x1A
-#define REG_TOUCH_NUM 0x02
-#define REG_TOUCH_X1H 0x03
-#define REG_TOUCH_X1L 0x04
-#define REG_TOUCH_Y1H 0x05
-#define REG_TOUCH_Y1L 0x06
+#if __has_include("TouchDrvCSTXXX.hpp")
+  #include "TouchDrvCSTXXX.hpp"
+  static TouchDrvCST92xx _touch;
+  static bool _touch_ok = false;
+#endif
 
 namespace hal {
 
-static bool _touch_ready = false;
-
 bool touch_init() {
+#if __has_include("TouchDrvCSTXXX.hpp")
+    // Reset séquence (GPIO2 partagé avec LCD_RST — déjà HIGH à ce stade)
     pinMode(PIN_TP_RST, OUTPUT);
-    digitalWrite(PIN_TP_RST, LOW);
-    delay(10);
-    digitalWrite(PIN_TP_RST, HIGH);
-    delay(50);
+    digitalWrite(PIN_TP_RST, LOW);  delay(30);
+    digitalWrite(PIN_TP_RST, HIGH); delay(50);
 
-    pinMode(PIN_TP_INT, INPUT);
+    _touch.setPins(PIN_TP_RST, PIN_TP_INT);
+    _touch_ok = _touch.begin(Wire, 0x5A, PIN_IIC_SDA, PIN_IIC_SCL);
 
-    // Wire déjà initialisé par pmu.begin() — pas de Wire.begin() ici
-    Wire.beginTransmission(CST9220_ADDR);
-    if (Wire.endTransmission() != 0) {
-        Serial.println("[TOUCH] CST9220 not found on I2C 0x1A");
+    if (!_touch_ok) {
+        Serial.printf("[TOUCH] CST9220 not found (SensorLib 0x5A RST=%d INT=%d)\n",
+                      PIN_TP_RST, PIN_TP_INT);
         return false;
     }
-    _touch_ready = true;
-    Serial.println("[TOUCH] CST9220 ready (INT=GPIO11, RST=GPIO40)");
+
+    _touch.setMaxCoordinates(LCD_WIDTH, LCD_HEIGHT);
+    _touch.setSwapXY(true);
+    _touch.setMirrorXY(true, false);
+
+    Serial.printf("[TOUCH] CST9220 OK — %s (RST=%d INT=%d)\n",
+                  _touch.getModelName(), PIN_TP_RST, PIN_TP_INT);
     return true;
+#else
+    Serial.println("[TOUCH] SensorLib absent — stub");
+    return false;
+#endif
 }
 
 bool touch_read(uint16_t &x, uint16_t &y) {
-    if (!_touch_ready) return false;
-    Wire.beginTransmission(CST9220_ADDR);
-    Wire.write(REG_TOUCH_NUM);
-    Wire.endTransmission(false);
-    Wire.requestFrom((uint8_t)CST9220_ADDR, (uint8_t)5);
-    if (Wire.available() < 5) return false;
-    uint8_t num  = Wire.read();
-    uint8_t xh   = Wire.read();
-    uint8_t xl   = Wire.read();
-    uint8_t yh   = Wire.read();
-    uint8_t yl   = Wire.read();
-    if (num == 0) return false;
-    x = ((uint16_t)(xh & 0x0F) << 8) | xl;
-    y = ((uint16_t)(yh & 0x0F) << 8) | yl;
+#if __has_include("TouchDrvCSTXXX.hpp")
+    if (!_touch_ok) return false;
+    int16_t tx[1], ty[1];
+    if (_touch.getPoint(tx, ty, 1) == 0) return false;
+    x = (uint16_t)tx[0];
+    y = (uint16_t)ty[0];
     return true;
+#else
+    return false;
+#endif
 }
 
 bool touch_has_data() {
