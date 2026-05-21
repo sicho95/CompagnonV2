@@ -3,6 +3,7 @@
 // CO5300 AMOLED QSPI — 466x466
 // Luminosité : gfx->setBrightness(0-255) via Arduino_CO5300
 // (pas de broche backlight séparée sur ce board)
+// fix: buffers LVGL alloués en PSRAM via ps_malloc()
 // ============================================================
 #include "display.h"
 #include "drivers/co5300.h"
@@ -15,10 +16,10 @@ static lv_display_t* _disp = nullptr;
 
 #define DISP_W   LCD_WIDTH
 #define DISP_H   LCD_HEIGHT
-#define BUF_LINES 20
+#define BUF_LINES 40
 
-static lv_color_t _buf1[DISP_W * BUF_LINES];
-static lv_color_t _buf2[DISP_W * BUF_LINES];
+static lv_color_t* _buf1 = nullptr;
+static lv_color_t* _buf2 = nullptr;
 
 static void _flush_cb(lv_display_t* disp,
                       const lv_area_t* area,
@@ -32,19 +33,33 @@ bool display_init() {
     // Initialise le panel + setBrightness(200) dans co5300::init()
     co5300::init();
 
+    // Allouer les buffers LVGL en PSRAM (évite saturation SRAM interne)
+    size_t buf_sz = (size_t)DISP_W * BUF_LINES * sizeof(lv_color_t);
+    _buf1 = (lv_color_t*)ps_malloc(buf_sz);
+    _buf2 = (lv_color_t*)ps_malloc(buf_sz);
+    if (!_buf1) {
+        // Fallback SRAM si PSRAM absente
+        _buf1 = (lv_color_t*)malloc(buf_sz);
+        _buf2 = nullptr;
+        Serial.println("[DISPLAY] WARN: PSRAM indisponible, fallback SRAM");
+    }
+
     _disp = lv_display_create(DISP_W, DISP_H);
     lv_display_set_flush_cb(_disp, _flush_cb);
     lv_display_set_buffers(_disp, _buf1, _buf2,
-                           sizeof(_buf1),
+                           buf_sz,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
     Serial.printf("[DISPLAY] CO5300 QSPI — driver OK (%dx%d)\n"
-                  "  CS=%d SCK=%d D0=%d D1=%d D2=%d D3=%d RST=%d\n",
+                  "  CS=%d SCK=%d D0=%d D1=%d D2=%d D3=%d RST=%d\n"
+                  "  buf_sz=%u bytes (PSRAM=%s)\n",
                   DISP_W, DISP_H,
                   PIN_LCD_CS, PIN_LCD_SCLK,
                   PIN_LCD_SIO0, PIN_LCD_SI1,
                   PIN_LCD_SI2, PIN_LCD_SI3,
-                  PIN_LCD_RST);
+                  PIN_LCD_RST,
+                  (unsigned)buf_sz,
+                  (_buf2 != nullptr) ? "oui" : "non");
     return (_disp != nullptr);
 }
 

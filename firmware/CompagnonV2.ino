@@ -5,10 +5,10 @@
  * Board     : Waveshare ESP32-S3-Touch-AMOLED-2.16 (CO5300 + CST9220 + QMI8658 + AXP2101)
  *
  * Ordre d'init critique :
- *  0. lv_init()  — DOIT être le tout premier appel LVGL
+ *  0. lv_init()  — DOIT être le tout premier appel LVGL (une seule fois ici)
  *  1. PMU        — rails ALDO1/ALDO3, bouton power
  *  2. NVS        — namespace "compagnon"
- *  3. Display    — lv_display_create() + buffers (apres lv_init !)
+ *  3. Display    — lv_display_create() + buffers PSRAM (après lv_init !)
  *  4. Touch      — 500 ms post-reset, CST9220
  *  5. IMU        — QMI8658 orientation
  *  6. Audio      — I2S mic + codec (init silencieux)
@@ -205,16 +205,15 @@ void setup() {
     delay(200);
     Serial.println("\n[BOOT] CompagnonV2 — demarrage");
 
-    // ── 0. LVGL init — OBLIGATOIRE en tout premier avec <lvgl.h> raw ─────────────
-    // Contrairement au wrapper LVGL.h (Arduino), <lvgl.h> n'appelle pas
-    // lv_init() automatiquement. Sans cet appel, lv_display_create()
-    // crashe sur l'offset 0x14 (champ interne non initialisé) → LoadProhibited.
+    // ── 0. LVGL init — UNE SEULE FOIS, tout premier appel LVGL ──────────────
+    // <lvgl.h> raw n'appelle pas lv_init() automatiquement.
+    // os_main.cpp NE doit plus appeler lv_init() (guard supprimé).
     lv_init();
     Serial.println("[BOOT] LVGL init OK");
 
     hal_pmu_init();
     nvs_config_init();
-    hal_display_init();   // lv_display_create() + buffers — sûr après lv_init()
+    hal_display_init();   // lv_display_create() + buffers PSRAM — sûr après lv_init()
     hal_touch_init();
     hal_imu_init();
     hal_audio_init();
@@ -238,8 +237,8 @@ void setup() {
 
 // ─── Loop (Core 1) ─────────────────────────────────────────────────────────
 void loop() {
-    lv_tick_inc(1);      // avance le timer interne LVGL de 1ms — OBLIGATOIRE
-    lv_task_handler();   // traite les événements et renders LVGL
+    lv_tick_inc(1);        // avance le timer interne LVGL de 1ms — OBLIGATOIRE
+    lv_timer_handler();    // fix: lv_task_handler() n'existe plus en LVGL 9.x
 
     hal_pmu_tick();
     wifi_mgr_tick();

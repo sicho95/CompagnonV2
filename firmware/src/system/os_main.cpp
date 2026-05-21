@@ -2,8 +2,8 @@
 // CompagnonV2 — system/os_main.cpp
 // B2  — syncNtp() appelé dans callback WiFi connected
 // R2  — apps_register_all() retiré d'ici (fait dans main.cpp)
-// R3  — lv_init() conservé ici (display.cpp ne l'appelle pas)
-//        + guard _lv_initialized pour éviter double init
+// fix — lv_init() SUPPRIMÉ ici : appelé une seule fois dans setup() (.ino)
+//        guard _lv_initialized retiré (inutile et source de double-init)
 // R5  — stack sizes augmentées : ui→12288, os→8192, ble→8192
 // W2  — WifiMgr::tick() appelé dans task_network
 // fix — appels UI via noms C-flat (extern "C") :
@@ -35,14 +35,10 @@ static TaskHandle_t _h_ble   = nullptr;
 static TaskHandle_t _h_net   = nullptr;
 
 // ── task_ui_lvgl — Core 1, prio 5 ────────────────────────────
-// R3 — display.cpp ne fait pas lv_init() → on l'appelle ici
-//      guard statique pour prévenir tout double appel futur
+// fix: lv_init() supprimé — déjà appelé dans setup() du .ino avant os_start()
+// Un double appel lv_init() en LVGL 9.x provoque un comportement indéfini
+// et empêche l'affichage (écran noir). Guard _lv_initialized supprimé.
 static void task_ui_lvgl(void*) {
-    static bool _lv_initialized = false;
-    if (!_lv_initialized) {
-        lv_init();
-        _lv_initialized = true;
-    }
     // fix: appels C-flat (extern "C") — les headers ne déclarent pas de namespace ui::
     ui_status_bar_init();
     ui_launcher_init();
