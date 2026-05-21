@@ -10,7 +10,6 @@
 #include "../../include/pins.h"
 #include <Wire.h>
 
-// TouchDrv.hpp = header unifié SensorLib 0.4+ (remplace TouchDrvCSTXXX.hpp deprecated)
 #if __has_include("TouchDrv.hpp")
   #include "TouchDrv.hpp"
   static TouchDrvCST92xx _touch;
@@ -21,7 +20,6 @@ namespace hal {
 
 bool touch_init() {
 #if __has_include("TouchDrv.hpp")
-    // Reset séquence (GPIO2 partagé avec LCD_RST — déjà HIGH à ce stade)
     pinMode(PIN_TP_RST, OUTPUT);
     digitalWrite(PIN_TP_RST, LOW);  delay(30);
     digitalWrite(PIN_TP_RST, HIGH); delay(50);
@@ -30,7 +28,7 @@ bool touch_init() {
     _touch_ok = _touch.begin(Wire, 0x5A, PIN_IIC_SDA, PIN_IIC_SCL);
 
     if (!_touch_ok) {
-        Serial.printf("[TOUCH] CST9220 not found (SensorLib 0x5A RST=%d INT=%d)\n",
+        Serial.printf("[TOUCH] CST9220 not found (0x5A RST=%d INT=%d)\n",
                       PIN_TP_RST, PIN_TP_INT);
         return false;
     }
@@ -52,12 +50,16 @@ bool touch_read(uint16_t &x, uint16_t &y) {
 #if __has_include("TouchDrv.hpp")
     if (!_touch_ok) return false;
 
-    // SensorLib 0.4.1 : getTouchPoints() sans argument, retourne const TouchPoints&
+    // API SensorLib 0.4.1 (TouchPoints.hpp) :
+    //   getTouchPoints()          — retourne const TouchPoints&
+    //   pts.hasPoints()           — au moins 1 point
+    //   pts.getPointCount()       — nombre de points
+    //   pts.getPoint(index).x/.y  — accès au point
     const TouchPoints &pts = _touch.getTouchPoints();
-    if (pts.points == 0) return false;
+    if (!pts.hasPoints()) return false;
 
-    x = (uint16_t)pts.coordinates[0].x;
-    y = (uint16_t)pts.coordinates[0].y;
+    x = pts.getPoint(0).x;
+    y = pts.getPoint(0).y;
     return true;
 #else
     return false;
