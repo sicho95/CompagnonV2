@@ -1,6 +1,7 @@
 // ============================================================
 // CompagnonV2 — hal/display.cpp
 // CO5300 AMOLED QSPI — 480x480
+// Luminosité : ledcWrite sur PIN_LCD_BL (PWM)
 // ============================================================
 #include "display.h"
 #include "drivers/co5300.h"
@@ -29,6 +30,13 @@ static void _flush_cb(lv_display_t* disp,
 bool display_init() {
     co5300::init();
 
+    // Backlight PWM — Arduino_GFX n'a pas setBrightness()
+    // PIN_LCD_BL doit être défini dans include/pins.h
+#ifdef PIN_LCD_BL
+    ledcAttach(PIN_LCD_BL, 1000, 8);   // freq=1kHz, résolution=8-bit
+    ledcWrite(PIN_LCD_BL, 200);        // ~78% luminosité initiale
+#endif
+
     _disp = lv_display_create(DISP_W, DISP_H);
     lv_display_set_flush_cb(_disp, _flush_cb);
     lv_display_set_buffers(_disp, _buf1, _buf2,
@@ -54,8 +62,12 @@ void display_flush(int32_t x1, int32_t y1,
 }
 
 void display_set_brightness(uint8_t pct) {
-    if (co5300::gfx()) co5300::gfx()->setBrightness(pct * 255 / 100);
+    // Luminosité via PWM backlight (0-100% → 0-255)
+#ifdef PIN_LCD_BL
+    ledcWrite(PIN_LCD_BL, (uint32_t)pct * 255 / 100);
+#endif
 }
+
 void display_sleep()  { co5300::_cmd(0x10); }
 void display_wakeup() { co5300::_cmd(0x11); delay(120); }
 

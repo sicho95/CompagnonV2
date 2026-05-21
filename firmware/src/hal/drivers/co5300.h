@@ -45,8 +45,9 @@ void init() {
     // Orientation register — obligatoire post-init (Waveshare)
     _bus->writeC8D8(0x36, 0xA0);
 
-    _gfx->fillScreen(BLACK);
-    _gfx->setBrightness(200);
+    // Effacer l'écran (0x0000 = noir RGB565, pas de macro BLACK dans GFX_Library)
+    _gfx->fillScreen(0x0000);
+    // Note: la luminosité est gérée via ledcWrite(PIN_LCD_BL) dans display.cpp
 }
 
 void flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2,

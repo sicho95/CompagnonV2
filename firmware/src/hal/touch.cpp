@@ -1,6 +1,6 @@
 // ============================================================
 // CompagnonV2 — hal/touch.cpp
-// CST9220 via SensorLib TouchDrvCST92xx
+// CST9220 via SensorLib TouchDrv.hpp (API unifiée v0.4+)
 // TP_INT=GPIO11  TP_RST=GPIO2 (partagé avec LCD_RST)
 // Adresse SensorLib : 0x5A
 // Référence : Waveshare examples/Arduino-v3.3.5/05_LVGL_Widgets
@@ -10,8 +10,9 @@
 #include "../../include/pins.h"
 #include <Wire.h>
 
-#if __has_include("TouchDrvCSTXXX.hpp")
-  #include "TouchDrvCSTXXX.hpp"
+// TouchDrv.hpp = header unifié SensorLib 0.4+ (remplace TouchDrvCSTXXX.hpp deprecated)
+#if __has_include("TouchDrv.hpp")
+  #include "TouchDrv.hpp"
   static TouchDrvCST92xx _touch;
   static bool _touch_ok = false;
 #endif
@@ -19,7 +20,7 @@
 namespace hal {
 
 bool touch_init() {
-#if __has_include("TouchDrvCSTXXX.hpp")
+#if __has_include("TouchDrv.hpp")
     // Reset séquence (GPIO2 partagé avec LCD_RST — déjà HIGH à ce stade)
     pinMode(PIN_TP_RST, OUTPUT);
     digitalWrite(PIN_TP_RST, LOW);  delay(30);
@@ -48,10 +49,11 @@ bool touch_init() {
 }
 
 bool touch_read(uint16_t &x, uint16_t &y) {
-#if __has_include("TouchDrvCSTXXX.hpp")
+#if __has_include("TouchDrv.hpp")
     if (!_touch_ok) return false;
     int16_t tx[1], ty[1];
-    if (_touch.getPoint(tx, ty, 1) == 0) return false;
+    // getTouchPoints() = API v0.4+ (getPoint() deprecated)
+    if (_touch.getTouchPoints(tx, ty, 1) == 0) return false;
     x = (uint16_t)tx[0];
     y = (uint16_t)ty[0];
     return true;
