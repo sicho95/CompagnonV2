@@ -1,9 +1,6 @@
 // ============================================================
 // CompagnonV2 — hal/display.cpp
 // CO5300 AMOLED QSPI — 466x466
-// Luminosité : gfx->setBrightness(0-255) via Arduino_CO5300
-// fix: buffers LVGL alloués en PSRAM via ps_malloc()
-// fix: lv_refr_now() après init pour forcer le premier flush
 // ============================================================
 #include "display.h"
 #include "drivers/co5300.h"
@@ -69,11 +66,12 @@ void display_flush(int32_t x1, int32_t y1,
 }
 
 void display_set_brightness(uint8_t pct) {
-    if (co5300::gfx())
-        co5300::gfx()->setBrightness((uint8_t)((uint32_t)pct * 255 / 100));
+    // setBrightness() est sur Arduino_CO5300, pas sur Arduino_GFX base
+    // on passe par co5300::gfx() qui retourne le bon type concret
+    Arduino_CO5300* g = co5300::gfx();
+    if (g) g->setBrightness((uint8_t)((uint32_t)pct * 255 / 100));
 }
 
-// Force un flush immédiat — appeler après lv_scr_load() si l'écran reste noir
 void display_force_refresh() {
     if (_disp) lv_refr_now(_disp);
 }

@@ -3,10 +3,7 @@
 // CompagnonV2 — drivers/co5300.h
 // CO5300 AMOLED QSPI — Waveshare ESP32-S3-Touch-AMOLED-2.16"
 // Bus : QSPI  CS=12 SCK=38 D0=4 D1=5 D2=6 D3=7  RST=2
-// Résolution : 466 x 466 (source officielle Waveshare pin_config.h)
-// Luminosité : gfx->setBrightness(0-255) — PAS de PIN_LCD_BL sur ce board
-// Orientation : PAS de writeC8D8(0x36) ici — géré par LVGL via lv_display_set_rotation()
-//               appelé automatiquement dans loop() selon hal_imu_orientation()
+// Résolution : 466 x 466
 // ============================================================
 #include <Arduino.h>
 #include "Arduino_GFX_Library.h"
@@ -33,7 +30,7 @@ void init() {
     _gfx = new Arduino_CO5300(
         _bus,
         PIN_LCD_RST,
-        0 /* rotation — laissé à 0, LVGL gère via lv_display_set_rotation() */,
+        0,
         LCD_WIDTH,
         LCD_HEIGHT,
         0, 0, 0, 0
@@ -44,18 +41,13 @@ void init() {
         return;
     }
 
-    // NE PAS envoyer writeC8D8(0x36, 0xA0) ici :
-    // ce registre MADCTL swap les axes hardware et rend le flush LVGL invisible.
-    // L'orientation est gérée logiquement par LVGL via lv_display_set_rotation()
-    // déclenchée dans loop() par hal_imu_changed() / hal_imu_orientation().
+    // ── DIAG : remplir en ROUGE VIF pour verifier que le driver QSPI fonctionne
+    // Si l'ecran est rouge ici  → driver OK, probleme vient du flush LVGL
+    // Si l'ecran reste noir     → driver QSPI KO (begin() ne remet pas le panel ON)
+    _gfx->fillScreen(0xF800);  // RGB565 rouge pur
+    Serial.println("[CO5300] fillScreen ROUGE envoye — verifier ecran");
 
-    // Effacer l'écran
-    _gfx->fillScreen(RGB565_BLACK);
-
-    // Luminosité via setBrightness() — ce board n'a PAS de broche PIN_LCD_BL séparée
-    // 200/255 ≈ 78% (valeur recommandée Waveshare)
     _gfx->setBrightness(200);
-
     Serial.println("[CO5300] init OK");
 }
 
@@ -64,10 +56,16 @@ void flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
     if (!_gfx) return;
     uint32_t w = x2 - x1 + 1;
     uint32_t h = y2 - y1 + 1;
+    // LOG du premier flush LVGL uniquement
+    static bool _first = true;
+    if (_first) {
+        Serial.printf("[CO5300] premier flush LVGL: x1=%d y1=%d x2=%d y2=%d w=%d h=%d\n",
+                      (int)x1,(int)y1,(int)x2,(int)y2,(int)w,(int)h);
+        _first = false;
+    }
     _gfx->draw16bitRGBBitmap(x1, y1, (uint16_t*)color_map, w, h);
 }
 
-// Retourne le type concret Arduino_CO5300* pour accéder à setBrightness()
 Arduino_CO5300* gfx() { return _gfx; }
 
 } // namespace co5300
