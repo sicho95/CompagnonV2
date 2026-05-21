@@ -190,7 +190,7 @@ void start() {
     lv_obj_t* mic_lbl = lv_label_create(_mic_btn);
     lv_label_set_text(mic_lbl, LV_SYMBOL_AUDIO); lv_obj_center(mic_lbl);
     lv_obj_add_event_cb(_mic_btn, [](lv_event_t*) {
-        voice_engine_start_recording();
+        voice_engine_start_recording();  // fix: voice::start_recording() → voice_engine_start_recording()
     }, LV_EVENT_CLICKED, nullptr);
 
     _status_lbl = lv_label_create(_screen);
