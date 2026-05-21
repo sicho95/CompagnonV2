@@ -3,9 +3,8 @@
 // CompagnonV2 — drivers/co5300.h
 // CO5300 AMOLED QSPI — Waveshare ESP32-S3-Touch-AMOLED-2.16"
 // Bus : QSPI  CS=12 SCK=38 D0=4 D1=5 D2=6 D3=7  RST=2
-// Résolution : 480 x 480 (carré)
-// Protocole  : Arduino_GFX Arduino_ESP32QSPI + Arduino_CO5300
-// Référence  : code officiel Waveshare (examples/Arduino-v3.3.5)
+// Résolution : 466 x 466 (source officielle Waveshare pin_config.h)
+// Luminosité : gfx->setBrightness(0-255) — PAS de PIN_LCD_BL sur ce board
 // ============================================================
 #include <Arduino.h>
 #include "Arduino_GFX_Library.h"
@@ -42,12 +41,16 @@ void init() {
         Serial.println("[CO5300] gfx->begin() FAILED");
         return;
     }
-    // Orientation register — obligatoire post-init (Waveshare)
+
+    // Registre orientation — obligatoire post-init (Waveshare exemple 01_HelloWorld)
     _bus->writeC8D8(0x36, 0xA0);
 
-    // Effacer l'écran (0x0000 = noir RGB565, pas de macro BLACK dans GFX_Library)
-    _gfx->fillScreen(0x0000);
-    // Note: la luminosité est gérée via ledcWrite(PIN_LCD_BL) dans display.cpp
+    // Effacer l'écran
+    _gfx->fillScreen(RGB565_BLACK);
+
+    // Luminosité via setBrightness() — ce board n'a PAS de broche PIN_LCD_BL séparée
+    // 200/255 ≈ 78% (valeur recommandée Waveshare)
+    _gfx->setBrightness(200);
 }
 
 void flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
