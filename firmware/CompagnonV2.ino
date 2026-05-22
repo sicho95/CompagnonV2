@@ -251,17 +251,21 @@ void loop() {
     ui_status_bar_tick();
     hal_imu_tick();
 
-    // Rotation auto selon orientation IMU
-    if (hal_imu_changed()) {
-        lv_display_t* disp = hal_display_get();
-        if (disp) {
-            static const lv_display_rotation_t rot_map[] = {
-                LV_DISPLAY_ROTATION_270, LV_DISPLAY_ROTATION_0,
-                LV_DISPLAY_ROTATION_90,  LV_DISPLAY_ROTATION_180,
-            };
-            lv_display_set_rotation(disp, rot_map[hal_imu_orientation()]);
-        }
-    }
+    // ROTATION AUTO IMU — DESACTIVEE
+    // Ce bloc ecrasait lv_display_set_rotation(LV_DISPLAY_ROTATION_270) fixe dans
+    // display_init(), ce qui remettait la rotation a 0 des le premier tick de loop()
+    // et causait un ecran noir. A reactiverplus tard avec un flag user opt-in.
+    //
+    // if (hal_imu_changed()) {
+    //     lv_display_t* disp = hal_display_get();
+    //     if (disp) {
+    //         static const lv_display_rotation_t rot_map[] = {
+    //             LV_DISPLAY_ROTATION_270, LV_DISPLAY_ROTATION_0,
+    //             LV_DISPLAY_ROTATION_90,  LV_DISPLAY_ROTATION_180,
+    //         };
+    //         lv_display_set_rotation(disp, rot_map[hal_imu_orientation()]);
+    //     }
+    // }
 
     orchestrator_tick();
     power_mgr_tick();
