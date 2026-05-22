@@ -41,12 +41,8 @@ void init() {
         return;
     }
 
-    // ── DIAG : remplir en ROUGE VIF pour verifier que le driver QSPI fonctionne
-    // Si l'ecran est rouge ici  → driver OK, probleme vient du flush LVGL
-    // Si l'ecran reste noir     → driver QSPI KO (begin() ne remet pas le panel ON)
-    _gfx->fillScreen(0xF800);  // RGB565 rouge pur
-    Serial.println("[CO5300] fillScreen ROUGE envoye — verifier ecran");
-
+    // Pas de fillScreen ici : LVGL va dessiner tout l'ecran lui-meme
+    // (RENDER_MODE_FULL + lv_obj_invalidate dans display_init)
     _gfx->setBrightness(200);
     Serial.println("[CO5300] init OK");
 }
@@ -56,13 +52,6 @@ void flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
     if (!_gfx) return;
     uint32_t w = x2 - x1 + 1;
     uint32_t h = y2 - y1 + 1;
-    // LOG du premier flush LVGL uniquement
-    static bool _first = true;
-    if (_first) {
-        Serial.printf("[CO5300] premier flush LVGL: x1=%d y1=%d x2=%d y2=%d w=%d h=%d\n",
-                      (int)x1,(int)y1,(int)x2,(int)y2,(int)w,(int)h);
-        _first = false;
-    }
     _gfx->draw16bitRGBBitmap(x1, y1, (uint16_t*)color_map, w, h);
 }
 
