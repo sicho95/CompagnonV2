@@ -41,9 +41,10 @@ void init() {
         return;
     }
 
-    // Pas de fillScreen ici : LVGL va dessiner tout l'ecran lui-meme
-    // (RENDER_MODE_FULL + lv_obj_invalidate dans display_init)
-    _gfx->setBrightness(200);
+    _gfx->displayOn();        // MIPI cmd 0x29 — OBLIGATOIRE sinon ecran noir physique
+    _gfx->setBrightness(200); // ~78% luminosite (recommande Waveshare)
+    _gfx->fillScreen(0x0000); // fond noir hardware avant le premier flush LVGL
+
     Serial.println("[CO5300] init OK");
 }
 
