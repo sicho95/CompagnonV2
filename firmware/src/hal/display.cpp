@@ -57,8 +57,10 @@ void display_set_brightness(uint8_t pct) {
     if (g) g->setBrightness((uint8_t)((uint32_t)pct * 255 / 100));
 }
 
-void display_sleep()  { co5300::_cmd(0x10); }
-void display_wakeup() { co5300::_cmd(0x11); delay(120); }
+// co5300::sleep()/wakeup() utilisent displayOff/displayOn (MIPI 0x28/0x29)
+// et incluent deja le delay(120) de recovery — pas besoin de le repeter ici.
+void display_sleep()  { co5300::sleep(); }
+void display_wakeup() { co5300::wakeup(); }
 
 void display_force_refresh() { lv_refr_now(s_disp); }
 
