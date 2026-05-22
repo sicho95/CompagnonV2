@@ -4,8 +4,8 @@
 #include <Arduino.h>
 #include <lvgl.h>
 
-#define DISP_W  LCD_WIDTH
-#define DISP_H  LCD_HEIGHT
+#define DISP_W   LCD_WIDTH
+#define DISP_H   LCD_HEIGHT
 #define BUF_LINES 40
 
 static lv_display_t* s_disp = nullptr;
@@ -20,7 +20,9 @@ static void flush_cb(lv_display_t* disp,
     lv_display_flush_ready(disp);
 }
 
-void hal_display_init() {
+namespace hal {
+
+void display_init() {
     co5300::init();
 
     size_t buf_sz = (size_t)DISP_W * BUF_LINES * sizeof(lv_color_t);
@@ -35,7 +37,7 @@ void hal_display_init() {
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_rotation(s_disp, LV_DISPLAY_ROTATION_270);
 
-    Serial.printf("[DISPLAY] CO5300 QSPI — driver OK (%dx%d)\n"
+    Serial.printf("[DISPLAY] CO5300 QSPI \xe2\x80\x94 driver OK (%dx%d)\n"
                   "  CS=%d SCK=%d D0=%d D1=%d D2=%d D3=%d RST=%d\n"
                   "  buf_sz=%u bytes\n",
                   DISP_W, DISP_H,
@@ -46,14 +48,18 @@ void hal_display_init() {
                   (unsigned)buf_sz);
 }
 
-lv_display_t* hal_display_get()  { return s_disp; }
+lv_display_t* display_get() { return s_disp; }
 
-void hal_display_set_brightness(uint8_t pct) {
+void display_set_brightness(uint8_t pct) {
     // co5300::gfx() retourne Arduino_CO5300* qui expose setBrightness()
-    // — ne pas caster en Arduino_GFX* (classe de base sans cette méthode)
+    // Ne pas caster en Arduino_GFX* (classe de base sans cette methode)
     Arduino_CO5300* g = co5300::gfx();
     if (g) g->setBrightness((uint8_t)((uint32_t)pct * 255 / 100));
 }
 
-void hal_display_sleep()  { co5300::_cmd(0x10); }
-void hal_display_wakeup() { co5300::_cmd(0x11); delay(120); }
+void display_sleep()  { co5300::_cmd(0x10); }
+void display_wakeup() { co5300::_cmd(0x11); delay(120); }
+
+void display_force_refresh() { lv_refr_now(s_disp); }
+
+} // namespace hal
