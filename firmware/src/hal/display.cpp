@@ -49,6 +49,8 @@ void hal_display_init() {
 lv_display_t* hal_display_get()  { return s_disp; }
 
 void hal_display_set_brightness(uint8_t pct) {
+    // co5300::gfx() retourne Arduino_CO5300* qui expose setBrightness()
+    // — ne pas caster en Arduino_GFX* (classe de base sans cette méthode)
     Arduino_CO5300* g = co5300::gfx();
     if (g) g->setBrightness((uint8_t)((uint32_t)pct * 255 / 100));
 }
