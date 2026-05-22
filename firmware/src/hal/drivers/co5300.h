@@ -1,6 +1,9 @@
 #pragma once
 // ============================================================
-// CompagnonV2 — drivers/co5300.h  [DIAG ENDIANNESS]
+// CompagnonV2 — drivers/co5300.h
+// CO5300 AMOLED QSPI — Waveshare ESP32-S3-Touch-AMOLED-2.16"
+// Bus : QSPI  CS=12 SCK=38 D0=4 D1=5 D2=6 D3=7  RST=2
+// Résolution : 466 x 466
 // ============================================================
 #include <Arduino.h>
 #include "Arduino_GFX_Library.h"
@@ -30,26 +33,9 @@ void init() {
         return;
     }
 
-    _gfx->displayOn();
+    _gfx->displayOn();        // MIPI 0x29 — obligatoire sinon ecran noir
     _gfx->setBrightness(200);
-    _gfx->fillScreen(0x0000); // fond noir
-    delay(500);
-
-    // ── DIAG BANDES : 4 rectangles de 466x116 pixels chacun
-    // Tester les deux endianness pour chaque couleur
-    // Si tu vois des couleurs => on sait quelle endianness marche
-    // Si tout est noir => displayOn/fillScreen ne fonctionne pas du tout
-
-    // Bande 1 (haut) : ROUGE Little Endian  0xF800
-    _gfx->fillScreen(0x0000);
-    _gfx->fillRect(0,   0, 466, 116, 0xF800); // Rouge LE
-    _gfx->fillRect(0, 116, 466, 116, 0x07E0); // Vert  LE
-    _gfx->fillRect(0, 232, 466, 116, 0x001F); // Bleu  LE
-    _gfx->fillRect(0, 348, 466, 118, 0xFFFF); // Blanc LE
-    Serial.println("[CO5300] DIAG: bandes Rouge/Vert/Bleu/Blanc (LE) affichees");
-    Serial.println("[CO5300] Si ecran noir => displayOn/fillRect KO");
-    Serial.println("[CO5300] Si couleurs OK => endianness LE correct, swap LVGL inutile");
-    Serial.println("[CO5300] Si couleurs inversees => swap necessaire");
+    _gfx->fillScreen(0x0000); // fond noir avant premier flush LVGL
 
     Serial.println("[CO5300] init OK");
 }
