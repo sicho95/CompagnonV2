@@ -4,14 +4,19 @@
  *
  * IMPORTANT tick :
  *   LV_TICK_CUSTOM 1 → LVGL lit millis() automatiquement.
- *   NE PAS appeler lv_tick_inc() dans loop() sous peine de double-comptage
- *   qui empêche LVGL de redessiner quoi que ce soit.
+ *   NE PAS appeler lv_tick_inc() dans loop() sous peine de double-comptage.
+ *
+ * IMPORTANT endianness :
+ *   LV_COLOR_16_SWAP 1 → LVGL swappe les octets de chaque pixel RGB565
+ *   avant d'appeler flush_cb. Le CO5300 via QSPI attend du Big Endian.
+ *   Sans ce flag, les couleurs sont inversees et l'ecran reste noir sur fond noir.
  */
 #ifndef LV_CONF_H
 #define LV_CONF_H
 #include <stdint.h>
 
-#define LV_COLOR_DEPTH 16
+#define LV_COLOR_DEPTH  16
+#define LV_COLOR_16_SWAP 1   // CO5300 QSPI = Big Endian — OBLIGATOIRE
 
 #define LV_MEM_CUSTOM         1
 #define LV_MEM_CUSTOM_INCLUDE <stdlib.h>
@@ -52,8 +57,7 @@
 #define LV_USE_THEME_DEFAULT 1
 #define LV_THEME_DEFAULT_DARK 1
 
-// Résolution de la zone active CO5300 (panel physique 480x480, zone utile 466x466)
-// lv_display_create() est appelé avec 466x466 dans display.cpp
+// Resolution de la zone active CO5300 (panel physique 480x480, zone utile 466x466)
 #define LV_HOR_RES_MAX 466
 #define LV_VER_RES_MAX 466
 #define LV_DISPLAY_ROTATION LV_DISPLAY_ROTATION_0
