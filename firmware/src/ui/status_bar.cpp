@@ -28,8 +28,8 @@ void ui_status_bar_init() {
     lv_obj_set_style_pad_all(_bar, 0, 0);
     lv_obj_set_style_radius(_bar, 0, 0);
     lv_obj_clear_flag(_bar, LV_OBJ_FLAG_SCROLLABLE);
-    // La barre doit etre au-dessus de tout — lv_layer_top() garantit deja ca
-    lv_obj_set_style_z_index(_bar, 100, 0);
+    // LVGL 9 : lv_obj_set_style_z_index n'existe pas — utiliser move_foreground()
+    lv_obj_move_foreground(_bar);
 
     _label = lv_label_create(_bar);
     lv_label_set_text(_label, "CompagnonV2");
