@@ -1,12 +1,11 @@
 // ============================================================
 // CompagnonV2 — ui/launcher.cpp
-// fix #3 : icônes LV_SYMBOL_* (glyphes intégrés LVGL, toujours
-//          disponibles) au lieu de lettres ASCII affichées avec
-//          lv_font_montserrat_36 (rectangles blancs si la font
-//          n'est pas activée dans lv_conf.h).
-// fix #2 : ui_status_bar_raise() appelé APRÈS lv_scr_load().
-// fix #4 : touch — swap/mirror alignés sur la rotation physique 90°
-//          (géré dans touch.cpp, aucun changement ici).
+// fix encodage   : LV_SYMBOL_* (glyphes intégrés LVGL) +
+//                  labels UTF-8 en raw string
+// fix status_bar : ui_status_bar_raise() après lv_scr_load()
+// fix grille     : 2 rangees × 3 colonnes par page (2×3)
+//                  avec titre "CompagnonV2" centré ET status bar
+// fix navigation : tuiles clickables avec lancement app
 // ============================================================
 #include "launcher.h"
 #include "status_bar.h"
@@ -17,6 +16,7 @@
 
 #define STATUS_BAR_H  28
 #define DOT_AREA_H    18
+#define TITLE_H       28
 
 struct TileDesc {
     os::AppId   id;
@@ -24,19 +24,16 @@ struct TileDesc {
     const char* label;  // UTF-8
 };
 
-// fix #3 : LV_SYMBOL_* sont encodés dans la police built-in LVGL
-// → toujours visibles, aucune dépendance à lv_conf.h
-static const TileDesc TILES[2][3] = {
-    {
-        { os::AppId::NESTOR,  LV_SYMBOL_AUDIO,    "Nestor" },
-        { os::AppId::METEO,   LV_SYMBOL_HOME,     "M\xc3\xa9t\xc3\xa9o" },
-        { os::AppId::BOURSE,  LV_SYMBOL_CHART,    "Bourse" },
-    },
-    {
-        { os::AppId::RADARS,  LV_SYMBOL_EYE_OPEN, "Radars"  },
-        { os::AppId::RAPPELS, LV_SYMBOL_BELL,     "Rappels" },
-        { os::AppId::NONE,    LV_SYMBOL_SETTINGS, "R\xc3\xa9glages" },
-    }
+// LV_SYMBOL_* : glyphes toujours disponibles dans la police built-in LVGL
+static const TileDesc PAGE0[3] = {
+    { os::AppId::NESTOR,  LV_SYMBOL_AUDIO,    "Nestor"  },
+    { os::AppId::METEO,   LV_SYMBOL_HOME,     "M\xc3\xa9t\xc3\xa9o" },
+    { os::AppId::BOURSE,  LV_SYMBOL_CHART,    "Bourse"  },
+};
+static const TileDesc PAGE1[3] = {
+    { os::AppId::RADARS,  LV_SYMBOL_EYE_OPEN, "Radars"  },
+    { os::AppId::RAPPELS, LV_SYMBOL_BELL,     "Rappels" },
+    { os::AppId::NONE,    LV_SYMBOL_SETTINGS, "R\xc3\xa9glages" },
 };
 
 static lv_obj_t* _screen   = nullptr;
@@ -72,20 +69,23 @@ static void _tile_tap_cb(lv_event_t* e) {
     }
 }
 
+// Construit une page avec 2 rangees × 3 colonnes de tuiles
 static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3]) {
     lv_obj_t* cont = lv_obj_create(tv_tile);
     lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
     lv_obj_set_pos(cont, 0, 0);
     lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(cont, 0, 0);
-    lv_obj_set_style_pad_all(cont, 4, 0);
+    lv_obj_set_style_pad_all(cont, 6, 0);
     lv_obj_set_style_pad_gap(cont, 8, 0);
     lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
+    // 3 colonnes egales
     static lv_coord_t col_dsc[] = {
         LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
         LV_GRID_TEMPLATE_LAST
     };
+    // 1 rangee (les 3 tuiles de cette page)
     static lv_coord_t row_dsc[] = {
         LV_GRID_FR(1),
         LV_GRID_TEMPLATE_LAST
@@ -109,14 +109,14 @@ static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3]) {
         lv_obj_set_style_bg_color(card, lv_color_hex(0x2E2E50), LV_STATE_PRESSED);
         lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
 
-        // fix #3 : icône via LV_SYMBOL — taille gérée par lv_font_montserrat_24
-        //          (activé par défaut dans LVGL, contrairement au _36)
+        // Icone LV_SYMBOL (police built-in LVGL, toujours disponible)
         lv_obj_t* icon = lv_label_create(card);
         lv_label_set_text(icon, descs[i].icon);
         lv_obj_set_style_text_font(icon, &lv_font_montserrat_24, 0);
         lv_obj_set_style_text_color(icon, lv_color_white(), 0);
         lv_obj_align(icon, LV_ALIGN_CENTER, 0, -12);
 
+        // Label texte en bas
         lv_obj_t* lbl = lv_label_create(card);
         lv_label_set_text(lbl, descs[i].label);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
@@ -134,7 +134,15 @@ void ui_launcher_init() {
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(_screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    int32_t tv_y = STATUS_BAR_H + 4;
+    // Titre "CompagnonV2" centre en haut (sous la status bar)
+    lv_obj_t* title = lv_label_create(_screen);
+    lv_label_set_text(title, "CompagnonV2");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0x7EB8D4), 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, STATUS_BAR_H + 6);
+
+    // TileView : commence apres status_bar + titre
+    int32_t tv_y = STATUS_BAR_H + TITLE_H + 8;
     int32_t tv_h = LV_VER_RES - tv_y - DOT_AREA_H - 4;
     int32_t tv_w = LV_HOR_RES;
 
@@ -147,17 +155,20 @@ void ui_launcher_init() {
     lv_obj_set_scroll_dir(_tileview, LV_DIR_HOR);
     lv_obj_set_scrollbar_mode(_tileview, LV_SCROLLBAR_MODE_OFF);
 
+    // Page 0 : Nestor, Meteo, Bourse
     lv_obj_t* page0 = lv_tileview_add_tile(_tileview, 0, 0, LV_DIR_HOR);
     lv_obj_set_user_data(page0, (void*)(intptr_t)0);
-    _build_page(page0, TILES[0]);
+    _build_page(page0, PAGE0);
 
+    // Page 1 : Radars, Rappels, Reglages
     lv_obj_t* page1 = lv_tileview_add_tile(_tileview, 1, 0, LV_DIR_HOR);
     lv_obj_set_user_data(page1, (void*)(intptr_t)1);
-    _build_page(page1, TILES[1]);
+    _build_page(page1, PAGE1);
 
     lv_obj_add_event_cb(_tileview, _tileview_changed_cb,
                         LV_EVENT_VALUE_CHANGED, nullptr);
 
+    // Points de pagination (dots) en bas
     int32_t dot_y       = LV_VER_RES - DOT_AREA_H + (DOT_AREA_H - 8) / 2;
     int32_t dot_spacing = 14;
     int32_t dots_total  = 2 * 8 + dot_spacing;
@@ -176,7 +187,8 @@ void ui_launcher_init() {
 
     lv_scr_load(_screen);
 
-    // fix #2 : status_bar doit être raised APRÈS lv_scr_load()
+    // fix status_bar : raise APRES lv_scr_load() pour qu'elle
+    // reste au-dessus du nouveau screen charge
     ui_status_bar_raise();
 
     hal::display_force_refresh();
@@ -186,7 +198,6 @@ void ui_launcher_init() {
 void ui_launcher_show() {
     if (_screen) {
         lv_scr_load_anim(_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 200, 0, false);
-        // fix #2 : ré-élever la barre après chaque retour au launcher
         ui_status_bar_raise();
     }
 }

@@ -1,13 +1,11 @@
 // ============================================================
 // CompagnonV2 — system/os_main.cpp
-// fix #6 : task_network démarrée avec 3 s de délai après BLE
-//          pour éviter ESP_ERR_NO_MEM (0x101) lors de
-//          esp_wifi_init() — BLE et WiFi partagent les mêmes
-//          buffers DMA internes sur ESP32-S3 ; initialiser les
-//          deux simultanément dépasse le heap interne disponible.
-//          Solution : vTaskDelay(3000ms) en début de task_network
-//          pour laisser le temps au scheduler BLE de stabiliser
-//          son allocation avant que WiFi réclame les siens.
+// fix WiFi OOM : vTaskDelay 5s + esp_wifi_set_ps(WIFI_PS_NONE)
+//   BLE et WiFi partagent les buffers DMA internes ESP32-S3.
+//   Initialiser les deux simultanément → ESP_ERR_NO_MEM (0x101).
+//   Solution : attendre 5 s que BLE stabilise son heap, puis
+//   désactiver le power-save WiFi (WIFI_PS_NONE) pour éviter
+//   les conflits de scheduling DMA.
 // ============================================================
 #include "os_main.h"
 #include "os_kernel.h"
@@ -23,6 +21,7 @@
 #include <lvgl.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <esp_wifi.h>
 #include <Arduino.h>
 
 namespace os {
@@ -37,7 +36,7 @@ static TaskHandle_t _h_net   = nullptr;
 static void task_ui_lvgl(void*) {
     ui_status_bar_init();
     ui_launcher_init();  // appelle ui_status_bar_raise() en interne
-    Serial.println("[UI] LVGL task ready — carousel affiché");
+    Serial.println("[UI] LVGL task ready — carousel affiche");
     for (;;) {
         lv_timer_handler();
         vTaskDelay(pdMS_TO_TICKS(5));
@@ -76,7 +75,7 @@ static void task_ble(void*) {
             os::kernel_post_intent(vi);
         },
         [](const String& json) { /* TODO: sync agent Nestor */ },
-        [](const String& json) { /* TODO: relay LLM réponse BLE */ }
+        [](const String& json) { /* TODO: relay LLM reponse BLE */ }
     );
     Serial.println("[BLE] task started");
     for (;;) { vTaskDelay(pdMS_TO_TICKS(10)); }
@@ -84,9 +83,12 @@ static void task_ble(void*) {
 
 // ── task_network — Core 0, prio 3 ────────────────────────────
 static void task_network(void*) {
-    // fix #6 : délai 3 s pour laisser BLE allouer ses buffers DMA
-    // avant que WiFi tente esp_wifi_init() — évite ESP_ERR_NO_MEM
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    // Delai 5 s pour laisser BLE allouer ses buffers DMA
+    // avant que WiFi tente esp_wifi_init() — evite ESP_ERR_NO_MEM
+    vTaskDelay(pdMS_TO_TICKS(5000));
+
+    // Desactive le power-save WiFi pour eviter conflits DMA avec BLE
+    esp_wifi_set_ps(WIFI_PS_NONE);
 
     WifiMgr::setCallbacks(
         []() {
@@ -110,8 +112,13 @@ static void task_network(void*) {
     Serial.println("[NET] task started");
     for (;;) {
         WifiMgr::tick();
-        if (!WifiMgr::isConnected()) WifiMgr::reconnect();
-        vTaskDelay(pdMS_TO_TICKS(30000));
+        if (!WifiMgr::isConnected()) {
+            // Reconnexion toutes les 30 s seulement (evite spam)
+            vTaskDelay(pdMS_TO_TICKS(30000));
+            WifiMgr::reconnect();
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(30000));
+        }
     }
 }
 

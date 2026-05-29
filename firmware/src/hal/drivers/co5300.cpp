@@ -1,8 +1,10 @@
 // ============================================================
 // CompagnonV2 — drivers/co5300.cpp
 // CO5300 AMOLED QSPI — implémentation
-// fix #1 : setRotation(1) pour corriger la rotation physique +90°
-//          du montage CO5300 dans le boîtier CompagnonV2
+// fix rotation : setRotation(0) — aucune rotation matérielle
+// La rotation est gérée par LVGL (LV_DISPLAY_ROTATION_0) ;
+// superposer setRotation(1) GFX + LVGL_ROTATION_0 créait un
+// décalage de +90° visible sur le boîtier.
 // ============================================================
 #include "co5300.h"
 
@@ -26,15 +28,17 @@ void init() {
         return;
     }
 
-    // fix #1 : rotation physique — le panneau CO5300 dans le boîtier
-    // est monté avec 90° de décalage (câble FPC en bas) → correction r=1
-    _gfx->setRotation(1);
+    // Rotation 0 — pas de rotation matérielle GFX.
+    // Si l'image est physiquement tournée de 90° dans le boîtier,
+    // utiliser LV_DISPLAY_ROTATION_90 dans display.cpp (LVGL gère
+    // le re-mappage des coordonnées et du touch de manière cohérente).
+    _gfx->setRotation(0);
 
     _gfx->displayOn();        // MIPI 0x29 — obligatoire sinon écran noir
     _gfx->setBrightness(200);
     _gfx->fillScreen(0x0000); // fond noir avant premier flush LVGL
 
-    Serial.println("[CO5300] init OK — rotation=1");
+    Serial.println("[CO5300] init OK — rotation=0");
 }
 
 void flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
