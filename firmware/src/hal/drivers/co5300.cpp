@@ -1,6 +1,8 @@
 // ============================================================
 // CompagnonV2 — drivers/co5300.cpp
 // CO5300 AMOLED QSPI — implémentation
+// fix #1 : setRotation(1) pour corriger la rotation physique +90°
+//          du montage CO5300 dans le boîtier CompagnonV2
 // ============================================================
 #include "co5300.h"
 
@@ -24,11 +26,15 @@ void init() {
         return;
     }
 
+    // fix #1 : rotation physique — le panneau CO5300 dans le boîtier
+    // est monté avec 90° de décalage (câble FPC en bas) → correction r=1
+    _gfx->setRotation(1);
+
     _gfx->displayOn();        // MIPI 0x29 — obligatoire sinon écran noir
     _gfx->setBrightness(200);
     _gfx->fillScreen(0x0000); // fond noir avant premier flush LVGL
 
-    Serial.println("[CO5300] init OK");
+    Serial.println("[CO5300] init OK — rotation=1");
 }
 
 void flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
@@ -40,8 +46,6 @@ void flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
 
 Arduino_CO5300* gfx() { return _gfx; }
 
-// SLPIN / SLPOUT : writeC8D8 est incorrect pour des commandes MIPI DCS
-// sans paramètre — utiliser l'API haut niveau de Arduino_GFX
 void sleep() {
     if (!_gfx) return;
     _gfx->displayOff(); // MIPI 0x28

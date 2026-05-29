@@ -2,10 +2,15 @@
 // CompagnonV2 — hal/touch.cpp
 // CST9220 via SensorLib TouchDrv.hpp (API unifiee v0.4+)
 // TP_INT=GPIO11  TP_RST=GPIO2 (partage avec LCD_RST)
-// fix: getPoint() direct + swap/mirror corriges pour ROTATION_0
+// fix #4 : lv_indev_set_display() ajouté — OBLIGATOIRE en LVGL9
+//          sans quoi l'indev n'est pas associé au display actif
+//          et les événements touch sont silencieusement ignorés.
+// fix #4 : swap/mirror corrigés pour la rotation physique 90°
+//          (co5300 setRotation(1)) : swapXY=true, mirrorX=false
 // ============================================================
 #include <Arduino.h>
 #include "touch.h"
+#include "display.h"
 #include "../../include/pins.h"
 #include <Wire.h>
 #include <lvgl.h>
@@ -55,14 +60,19 @@ bool touch_init() {
         return false;
     }
 
+    // fix #4 : résolution du panneau physique (avant rotation LVGL)
     _touch.setMaxCoordinates(LCD_WIDTH, LCD_HEIGHT);
-    // ROTATION_0 : pas de swap ni mirror
-    _touch.setSwapXY(false);
-    _touch.setMirrorXY(false, false);
+    // fix #4 : avec setRotation(1) dans co5300, le panneau est
+    // pivoté de 90° → le touch doit compenser : swapXY=true
+    _touch.setSwapXY(true);
+    _touch.setMirrorXY(false, true); // mirrorY pour que haut/bas correspond
 
     s_indev = lv_indev_create();
     lv_indev_set_type(s_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(s_indev, _lv_touch_read_cb);
+
+    // fix #4 : LVGL9 — OBLIGATOIRE pour lier l'indev au display actif
+    lv_indev_set_display(s_indev, hal::display_get());
 
     Serial.printf("[TOUCH] CST9220 OK \xe2\x80\x94 %s (RST=%d INT=%d)\n",
                   _touch.getModelName(), PIN_TP_RST, PIN_TP_INT);

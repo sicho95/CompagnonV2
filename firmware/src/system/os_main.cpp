@@ -1,11 +1,13 @@
 // ============================================================
 // CompagnonV2 — system/os_main.cpp
-// fix — lv_init() supprimé (appelé une fois dans setup())
-// fix — ui_status_bar_init/ui_launcher_init appelés UNE seule fois
-//        dans task_ui_lvgl (ne pas les rappeler depuis le .ino)
-// R5  — stack sizes : ui→12288, os→8192, ble→8192
-// W2  — WifiMgr::tick() dans task_network
-// B2  — syncNtp() dans callback WiFi connected
+// fix #6 : task_network démarrée avec 3 s de délai après BLE
+//          pour éviter ESP_ERR_NO_MEM (0x101) lors de
+//          esp_wifi_init() — BLE et WiFi partagent les mêmes
+//          buffers DMA internes sur ESP32-S3 ; initialiser les
+//          deux simultanément dépasse le heap interne disponible.
+//          Solution : vTaskDelay(3000ms) en début de task_network
+//          pour laisser le temps au scheduler BLE de stabiliser
+//          son allocation avant que WiFi réclame les siens.
 // ============================================================
 #include "os_main.h"
 #include "os_kernel.h"
@@ -32,11 +34,9 @@ static TaskHandle_t _h_ble   = nullptr;
 static TaskHandle_t _h_net   = nullptr;
 
 // ── task_ui_lvgl — Core 1, prio 5 ────────────────────────────
-// C'est ici et uniquement ici que status_bar et launcher sont initialisés.
-// Le .ino ne doit PAS les appeler — évite la double init.
 static void task_ui_lvgl(void*) {
     ui_status_bar_init();
-    ui_launcher_init();
+    ui_launcher_init();  // appelle ui_status_bar_raise() en interne
     Serial.println("[UI] LVGL task ready — carousel affiché");
     for (;;) {
         lv_timer_handler();
@@ -62,7 +62,6 @@ static void task_os_main(void*) {
 // ── task_voice_io — Core 0, prio 2 ───────────────────────────
 static void task_voice_io(void*) {
     Serial.println("[VOICE] task_voice_io started (Core 0)");
-    // voice::init() est fait dans kernel_init() (task_os_main).
     vTaskSuspend(nullptr);
 }
 
@@ -85,6 +84,10 @@ static void task_ble(void*) {
 
 // ── task_network — Core 0, prio 3 ────────────────────────────
 static void task_network(void*) {
+    // fix #6 : délai 3 s pour laisser BLE allouer ses buffers DMA
+    // avant que WiFi tente esp_wifi_init() — évite ESP_ERR_NO_MEM
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
     WifiMgr::setCallbacks(
         []() {
             Serial.println("[NET] WiFi connected");
