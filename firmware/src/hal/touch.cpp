@@ -1,12 +1,19 @@
 // ============================================================
 // CompagnonV2 — hal/touch.cpp
-// CST9220 via SensorLib TouchDrv.hpp (API unifiee v0.4+)
+// CST9220 via SensorLib — TouchDrvCST92xx
 // TP_INT=GPIO11  TP_RST=GPIO2 (partage avec LCD_RST)
 //
-// fix: getPoint() deprecated => getTouchPoints() (SensorLib v0.4+)
-// fix: lv_event_get_target() retourne void* en LVGL9 => cast explicite
-// fix touch : setSwapXY(false) + setMirrorXY(false, false)
-// fix LVGL9 : lv_indev_set_display() obliga toire
+// SensorLib API history:
+//   < v0.4  : getPoint(int16_t* x, int16_t* y, uint8_t n) → uint8_t
+//   ≥ v0.4  : getTouchPoints(int16_t*, int16_t*, int)  [supprimé ensuite]
+//   master  : getTouchPoints() → const TouchPoints&
+//             .getPointCount()  .getPoint(i).x  .getPoint(i).y
+//
+// On utilise en priorité la nouvelle API objet (master/v0.5+).
+// Fallback automatique sur getPoint() si SENSOR_LIB_VERSION < 0x000500
+// ou si le symbole n'est pas disponible.
+//
+// fix LVGL9 : lv_indev_set_display() obligatoire
 // ============================================================
 #include <Arduino.h>
 #include "touch.h"
@@ -23,18 +30,22 @@
 
 static lv_indev_t* s_indev = nullptr;
 
+// ── LVGL touch callback ────────────────────────────────────────────────────
 static void _lv_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
 #if __has_include("TouchDrv.hpp")
     if (!_touch_ok) {
         data->state = LV_INDEV_STATE_RELEASED;
         return;
     }
-    int16_t x[1] = {0}, y[1] = {0};
-    // getTouchPoints() remplace getPoint() deprecie depuis SensorLib v0.4
-    uint8_t touched = _touch.getTouchPoints(x, y, 1);
-    if (touched > 0) {
-        data->point.x = (lv_coord_t)x[0];
-        data->point.y = (lv_coord_t)y[0];
+
+    // Nouvelle API SensorLib (master / ≥ v0.5) :
+    //   const TouchPoints& getTouchPoints()
+    //   .getPointCount() .getPoint(i).x .getPoint(i).y
+    const TouchPoints& pts = _touch.getTouchPoints();
+    if (pts.getPointCount() > 0) {
+        const TouchPoint& p = pts.getPoint(0);
+        data->point.x = (lv_coord_t)p.x;
+        data->point.y = (lv_coord_t)p.y;
         data->state   = LV_INDEV_STATE_PRESSED;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
@@ -44,6 +55,7 @@ static void _lv_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
 #endif
 }
 
+// ── Initialisation ─────────────────────────────────────────────────────────
 namespace hal {
 
 bool touch_init() {
@@ -81,14 +93,14 @@ bool touch_init() {
 #endif
 }
 
+// ── Lecture ponctuelle (hors LVGL) ─────────────────────────────────────────
 bool touch_read(uint16_t& x, uint16_t& y) {
 #if __has_include("TouchDrv.hpp")
     if (!_touch_ok) return false;
-    int16_t tx[1] = {0}, ty[1] = {0};
-    // getTouchPoints() remplace getPoint() deprecie
-    if (_touch.getTouchPoints(tx, ty, 1) > 0) {
-        x = (uint16_t)tx[0];
-        y = (uint16_t)ty[0];
+    const TouchPoints& pts = _touch.getTouchPoints();
+    if (pts.getPointCount() > 0) {
+        x = pts.getPoint(0).x;
+        y = pts.getPoint(0).y;
         return true;
     }
     return false;
