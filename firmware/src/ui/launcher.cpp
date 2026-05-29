@@ -3,9 +3,10 @@
 // fix encodage   : LV_SYMBOL_* (glyphes intégrés LVGL) +
 //                  labels UTF-8 en raw string
 // fix status_bar : ui_status_bar_raise() après lv_scr_load()
-// fix grille     : 2 rangees × 3 colonnes par page (2×3)
+// fix grille     : 2 pages × 3 colonnes par page (2×3)
 //                  avec titre "CompagnonV2" centré ET status bar
 // fix navigation : tuiles clickables avec lancement app
+// fix compilation: LV_SYMBOL_CHART → LV_SYMBOL_CHARGE (n'existe pas dans LVGL)
 // ============================================================
 #include "launcher.h"
 #include "status_bar.h"
@@ -25,10 +26,11 @@ struct TileDesc {
 };
 
 // LV_SYMBOL_* : glyphes toujours disponibles dans la police built-in LVGL
+// LV_SYMBOL_CHART n'existe PAS dans LVGL — utiliser LV_SYMBOL_CHARGE à la place
 static const TileDesc PAGE0[3] = {
     { os::AppId::NESTOR,  LV_SYMBOL_AUDIO,    "Nestor"  },
     { os::AppId::METEO,   LV_SYMBOL_HOME,     "M\xc3\xa9t\xc3\xa9o" },
-    { os::AppId::BOURSE,  LV_SYMBOL_CHART,    "Bourse"  },
+    { os::AppId::BOURSE,  LV_SYMBOL_CHARGE,   "Bourse"  },
 };
 static const TileDesc PAGE1[3] = {
     { os::AppId::RADARS,  LV_SYMBOL_EYE_OPEN, "Radars"  },
@@ -69,7 +71,7 @@ static void _tile_tap_cb(lv_event_t* e) {
     }
 }
 
-// Construit une page avec 2 rangees × 3 colonnes de tuiles
+// Construit une page avec 3 tuiles en colonne
 static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3]) {
     lv_obj_t* cont = lv_obj_create(tv_tile);
     lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
