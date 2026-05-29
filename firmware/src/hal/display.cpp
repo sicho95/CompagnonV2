@@ -4,9 +4,9 @@
 #include <Arduino.h>
 #include <lvgl.h>
 
-#define DISP_W   LCD_WIDTH
-#define DISP_H   LCD_HEIGHT
-#define BUF_LINES 40
+#define DISP_W    LCD_WIDTH
+#define DISP_H    LCD_HEIGHT
+#define BUF_LINES 20   // réduit de 40→20 pour libérer ~55 KB heap BLE/WiFi
 
 static lv_display_t* s_disp = nullptr;
 static lv_color_t*   s_buf1 = nullptr;
@@ -35,7 +35,6 @@ void display_init() {
     lv_display_set_flush_cb(s_disp, flush_cb);
     lv_display_set_buffers(s_disp, s_buf1, s_buf2, buf_sz,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
-    // ROTATION_0 : pas de rotation supplementaire (panneau deja oriente correctement)
     lv_display_set_rotation(s_disp, LV_DISPLAY_ROTATION_0);
 
     Serial.printf("[DISPLAY] CO5300 QSPI \xe2\x80\x94 driver OK (%dx%d)\n"
