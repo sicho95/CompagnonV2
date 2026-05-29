@@ -2,7 +2,7 @@
 // CompagnonV2 — hal/touch.cpp
 // CST9220 via SensorLib TouchDrv.hpp (API unifiee v0.4+)
 // TP_INT=GPIO11  TP_RST=GPIO2 (partage avec LCD_RST)
-// Adresse SensorLib : 0x5A
+// fix: getPoint() direct + swap/mirror corriges pour ROTATION_0
 // ============================================================
 #include <Arduino.h>
 #include "touch.h"
@@ -16,8 +16,7 @@
   static bool _touch_ok = false;
 #endif
 
-// ── LVGL input device ─────────────────────────────────────────
-static lv_indev_t*  s_indev = nullptr;
+static lv_indev_t* s_indev = nullptr;
 
 static void _lv_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
 #if __has_include("TouchDrv.hpp")
@@ -25,10 +24,11 @@ static void _lv_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
         data->state = LV_INDEV_STATE_RELEASED;
         return;
     }
-    const TouchPoints& pts = _touch.getTouchPoints();
-    if (pts.hasPoints()) {
-        data->point.x = (lv_coord_t)pts.getPoint(0).x;
-        data->point.y = (lv_coord_t)pts.getPoint(0).y;
+    int16_t x = 0, y = 0;
+    uint8_t touched = _touch.getPoint(&x, &y, 1);
+    if (touched > 0) {
+        data->point.x = (lv_coord_t)x;
+        data->point.y = (lv_coord_t)y;
         data->state   = LV_INDEV_STATE_PRESSED;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
@@ -56,32 +56,33 @@ bool touch_init() {
     }
 
     _touch.setMaxCoordinates(LCD_WIDTH, LCD_HEIGHT);
-    // Sans rotation (ROTATION_0) : pas de swap ni mirror
+    // ROTATION_0 : pas de swap ni mirror
     _touch.setSwapXY(false);
     _touch.setMirrorXY(false, false);
 
-    // Enregistrer l'indev LVGL pour que les tap soient transmis aux widgets
     s_indev = lv_indev_create();
     lv_indev_set_type(s_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(s_indev, _lv_touch_read_cb);
 
-    Serial.printf("[TOUCH] CST9220 OK — %s (RST=%d INT=%d) — LVGL indev enregistre\n",
+    Serial.printf("[TOUCH] CST9220 OK \xe2\x80\x94 %s (RST=%d INT=%d)\n",
                   _touch.getModelName(), PIN_TP_RST, PIN_TP_INT);
     return true;
 #else
-    Serial.println("[TOUCH] SensorLib absent — stub");
+    Serial.println("[TOUCH] SensorLib absent \xe2\x80\x94 stub");
     return false;
 #endif
 }
 
-bool touch_read(uint16_t &x, uint16_t &y) {
+bool touch_read(uint16_t& x, uint16_t& y) {
 #if __has_include("TouchDrv.hpp")
     if (!_touch_ok) return false;
-    const TouchPoints& pts = _touch.getTouchPoints();
-    if (!pts.hasPoints()) return false;
-    x = pts.getPoint(0).x;
-    y = pts.getPoint(0).y;
-    return true;
+    int16_t tx = 0, ty = 0;
+    if (_touch.getPoint(&tx, &ty, 1) > 0) {
+        x = (uint16_t)tx;
+        y = (uint16_t)ty;
+        return true;
+    }
+    return false;
 #else
     return false;
 #endif
