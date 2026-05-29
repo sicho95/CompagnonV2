@@ -1,20 +1,42 @@
 // ============================================================
 // CompagnonV2 — hal/touch.cpp
-// CST9220 via SensorLib TouchDrv.hpp (API unifiée v0.4+)
-// TP_INT=GPIO11  TP_RST=GPIO2 (partagé avec LCD_RST)
+// CST9220 via SensorLib TouchDrv.hpp (API unifiee v0.4+)
+// TP_INT=GPIO11  TP_RST=GPIO2 (partage avec LCD_RST)
 // Adresse SensorLib : 0x5A
-// Référence : Waveshare examples/Arduino-v3.3.5/05_LVGL_Widgets
 // ============================================================
 #include <Arduino.h>
 #include "touch.h"
 #include "../../include/pins.h"
 #include <Wire.h>
+#include <lvgl.h>
 
 #if __has_include("TouchDrv.hpp")
   #include "TouchDrv.hpp"
   static TouchDrvCST92xx _touch;
   static bool _touch_ok = false;
 #endif
+
+// ── LVGL input device ─────────────────────────────────────────
+static lv_indev_t*  s_indev = nullptr;
+
+static void _lv_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
+#if __has_include("TouchDrv.hpp")
+    if (!_touch_ok) {
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+    const TouchPoints& pts = _touch.getTouchPoints();
+    if (pts.hasPoints()) {
+        data->point.x = (lv_coord_t)pts.getPoint(0).x;
+        data->point.y = (lv_coord_t)pts.getPoint(0).y;
+        data->state   = LV_INDEV_STATE_PRESSED;
+    } else {
+        data->state = LV_INDEV_STATE_RELEASED;
+    }
+#else
+    data->state = LV_INDEV_STATE_RELEASED;
+#endif
+}
 
 namespace hal {
 
@@ -34,10 +56,16 @@ bool touch_init() {
     }
 
     _touch.setMaxCoordinates(LCD_WIDTH, LCD_HEIGHT);
-    _touch.setSwapXY(true);
-    _touch.setMirrorXY(true, false);
+    // Sans rotation (ROTATION_0) : pas de swap ni mirror
+    _touch.setSwapXY(false);
+    _touch.setMirrorXY(false, false);
 
-    Serial.printf("[TOUCH] CST9220 OK — %s (RST=%d INT=%d)\n",
+    // Enregistrer l'indev LVGL pour que les tap soient transmis aux widgets
+    s_indev = lv_indev_create();
+    lv_indev_set_type(s_indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(s_indev, _lv_touch_read_cb);
+
+    Serial.printf("[TOUCH] CST9220 OK — %s (RST=%d INT=%d) — LVGL indev enregistre\n",
                   _touch.getModelName(), PIN_TP_RST, PIN_TP_INT);
     return true;
 #else
@@ -49,15 +77,8 @@ bool touch_init() {
 bool touch_read(uint16_t &x, uint16_t &y) {
 #if __has_include("TouchDrv.hpp")
     if (!_touch_ok) return false;
-
-    // API SensorLib 0.4.1 (TouchPoints.hpp) :
-    //   getTouchPoints()          — retourne const TouchPoints&
-    //   pts.hasPoints()           — au moins 1 point
-    //   pts.getPointCount()       — nombre de points
-    //   pts.getPoint(index).x/.y  — accès au point
-    const TouchPoints &pts = _touch.getTouchPoints();
+    const TouchPoints& pts = _touch.getTouchPoints();
     if (!pts.hasPoints()) return false;
-
     x = pts.getPoint(0).x;
     y = pts.getPoint(0).y;
     return true;

@@ -35,7 +35,8 @@ void display_init() {
     lv_display_set_flush_cb(s_disp, flush_cb);
     lv_display_set_buffers(s_disp, s_buf1, s_buf2, buf_sz,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
-    lv_display_set_rotation(s_disp, LV_DISPLAY_ROTATION_270);
+    // ROTATION_0 : pas de rotation supplementaire (panneau deja oriente correctement)
+    lv_display_set_rotation(s_disp, LV_DISPLAY_ROTATION_0);
 
     Serial.printf("[DISPLAY] CO5300 QSPI \xe2\x80\x94 driver OK (%dx%d)\n"
                   "  CS=%d SCK=%d D0=%d D1=%d D2=%d D3=%d RST=%d\n"
@@ -51,14 +52,10 @@ void display_init() {
 lv_display_t* display_get() { return s_disp; }
 
 void display_set_brightness(uint8_t pct) {
-    // co5300::gfx() retourne Arduino_CO5300* qui expose setBrightness()
-    // Ne pas caster en Arduino_GFX* (classe de base sans cette methode)
     Arduino_CO5300* g = co5300::gfx();
     if (g) g->setBrightness((uint8_t)((uint32_t)pct * 255 / 100));
 }
 
-// co5300::sleep()/wakeup() utilisent displayOff/displayOn (MIPI 0x28/0x29)
-// et incluent deja le delay(120) de recovery — pas besoin de le repeter ici.
 void display_sleep()  { co5300::sleep(); }
 void display_wakeup() { co5300::wakeup(); }
 
