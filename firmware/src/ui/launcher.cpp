@@ -1,8 +1,11 @@
 // ============================================================
 // CompagnonV2 — ui/launcher.cpp
-// Grille 3x2 d'icones, tap → os::app_launch()
-// Fix : icones ASCII (pas d'emoji — evite les rectangles),
-//       labels UTF-8 corrects, grille centree, touch LVGL actif
+// Carousel swipable 2 pages via lv_tileview
+//   Page 0 : Nestor | Météo | Bourse
+//   Page 1 : Radars  | Rappels | Réglages
+// Indicateur de page (2 points) centré en bas
+// Labels UTF-8 corrects (Météo, Réglages)
+// Touch LVGL actif via lv_indev enregistré dans touch.cpp
 // ============================================================
 #include "launcher.h"
 #include "../hal/display.h"
@@ -11,37 +14,125 @@
 #include <Arduino.h>
 
 #define STATUS_BAR_H  28
+#define DOT_AREA_H    18   // hauteur réservée aux points indicateurs
 
 // ── Descripteurs des tuiles ──────────────────────────────────
 struct TileDesc {
     os::AppId   id;
-    const char* icon;   // symbole ASCII/Latin simple (lv_font_montserrat_36 ne contient pas les emoji)
-    const char* label;
+    const char* icon;   // Lettre ou symbole ASCII — lv_font_montserrat_36
+    const char* label;  // UTF-8 correct
 };
 
-static const TileDesc TILES[] = {
-    { os::AppId::NESTOR,  "N",  "Nestor"  },
-    { os::AppId::METEO,   "M",  "M\xc3\xa9t\xc3\xa9o"   },   // Météo
-    { os::AppId::BOURSE,  "B",  "Bourse"  },
-    { os::AppId::RADARS,  "R",  "Radars"  },
-    { os::AppId::RAPPELS, "!",  "Rappels" },
-    { os::AppId::NONE,    "S",  "R\xc3\xa9glages" },            // Réglages
+// NOTE : lv_font_montserrat_14 inclut Latin-1 Supplement (U+0080–U+00FF)
+// → \xc3\xa9 = é, \xc3\xa8 = è, \xc3\xa0 = à sont supportés.
+static const TileDesc TILES[2][3] = {
+    {
+        { os::AppId::NESTOR,  "N", "Nestor" },
+        { os::AppId::METEO,   "M", "M\xc3\xa9t\xc3\xa9o" },   // Météo
+        { os::AppId::BOURSE,  "B", "Bourse" },
+    },
+    {
+        { os::AppId::RADARS,  "R", "Radars"  },
+        { os::AppId::RAPPELS, "!", "Rappels" },
+        { os::AppId::NONE,    "S", "R\xc3\xa9glages" },         // Réglages
+    }
 };
-static constexpr int N_TILES = 6;
 
 // ── State ────────────────────────────────────────────────────
-static lv_obj_t* _screen = nullptr;
-static lv_obj_t* _grid   = nullptr;
+static lv_obj_t* _screen    = nullptr;
+static lv_obj_t* _tileview  = nullptr;
+static lv_obj_t* _dot[2]    = {};
+static int        _cur_page  = 0;
+
+static const lv_color_t DOT_ACTIVE   = LV_COLOR_MAKE(0x4F, 0xC3, 0xF7);  // cyan clair
+static const lv_color_t DOT_INACTIVE = LV_COLOR_MAKE(0x33, 0x33, 0x55);
+
+// ── Mise à jour des points indicateurs ───────────────────────
+static void _update_dots(int page) {
+    for (int i = 0; i < 2; i++) {
+        lv_obj_set_style_bg_color(_dot[i],
+            (i == page) ? DOT_ACTIVE : DOT_INACTIVE, 0);
+    }
+    _cur_page = page;
+}
+
+// ── Callback changement de page tileview ─────────────────────
+static void _tileview_changed_cb(lv_event_t* e) {
+    lv_obj_t* tv = lv_event_get_target(e);
+    lv_obj_t* tile = lv_tileview_get_tile_active(tv);
+    // Récupérer la colonne (page) via user_data
+    int page = (int)(intptr_t)lv_obj_get_user_data(tile);
+    _update_dots(page);
+}
 
 // ── Callback tap tuile ───────────────────────────────────────
 static void _tile_tap_cb(lv_event_t* e) {
-    auto* desc = (TileDesc*)lv_event_get_user_data(e);
+    auto* desc = (const TileDesc*)lv_event_get_user_data(e);
     if (!desc) return;
     if (desc->id != os::AppId::NONE) {
         Serial.printf("[UI] launch app %d\n", (int)desc->id);
         os::app_launch(desc->id);
     } else {
         Serial.println("[UI] Reglages (TODO)");
+    }
+}
+
+// ── Construction d'une page de 3 tuiles ──────────────────────
+static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3]) {
+    // Conteneur flex 3 colonnes occupant toute la tuile
+    lv_obj_t* cont = lv_obj_create(tv_tile);
+    lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(cont, 0, 0);
+    lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(cont, 0, 0);
+    lv_obj_set_style_pad_all(cont, 4, 0);
+    lv_obj_set_style_pad_gap(cont, 8, 0);
+    lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
+
+    static lv_coord_t col_dsc[] = {
+        LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
+        LV_GRID_TEMPLATE_LAST
+    };
+    static lv_coord_t row_dsc[] = {
+        LV_GRID_FR(1),
+        LV_GRID_TEMPLATE_LAST
+    };
+    lv_obj_set_grid_dsc_array(cont, col_dsc, row_dsc);
+    lv_obj_set_layout(cont, LV_LAYOUT_GRID);
+
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t* card = lv_obj_create(cont);
+        lv_obj_set_size(card, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_grid_cell(card,
+            LV_GRID_ALIGN_STRETCH, i, 1,
+            LV_GRID_ALIGN_STRETCH, 0, 1);
+
+        lv_obj_set_style_bg_color(card, lv_color_hex(0x1C1C2E), 0);
+        lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(card, 16, 0);
+        lv_obj_set_style_border_width(card, 1, 0);
+        lv_obj_set_style_border_color(card, lv_color_hex(0x2A2A40), 0);
+        lv_obj_set_style_pad_all(card, 0, 0);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_bg_color(card, lv_color_hex(0x2E2E50), LV_STATE_PRESSED);
+        lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+
+        // Icône
+        lv_obj_t* icon = lv_label_create(card);
+        lv_label_set_text(icon, descs[i].icon);
+        lv_obj_set_style_text_font(icon, &lv_font_montserrat_36, 0);
+        lv_obj_set_style_text_color(icon, lv_color_white(), 0);
+        lv_obj_align(icon, LV_ALIGN_CENTER, 0, -12);
+
+        // Label
+        lv_obj_t* lbl = lv_label_create(card);
+        lv_label_set_text(lbl, descs[i].label);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(0xCCCCDD), 0);
+        lv_obj_align(lbl, LV_ALIGN_BOTTOM_MID, 0, -10);
+
+        lv_obj_add_event_cb(card, _tile_tap_cb, LV_EVENT_CLICKED,
+                            (void*)&descs[i]);
     }
 }
 
@@ -52,71 +143,57 @@ void ui_launcher_init() {
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(_screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Zone utile sous la status bar
-    int32_t grid_y    = STATUS_BAR_H + 8;
-    int32_t grid_h    = LV_VER_RES - grid_y - 8;
-    int32_t grid_w    = LV_HOR_RES - 16;  // marges gauche/droite de 8px
+    // Zone utile : sous la status bar, au-dessus des dots
+    int32_t tv_y = STATUS_BAR_H + 4;
+    int32_t tv_h = LV_VER_RES - tv_y - DOT_AREA_H - 4;
+    int32_t tv_w = LV_HOR_RES;
 
-    // Grille 3 colonnes, 2 lignes — centrée
-    _grid = lv_obj_create(_screen);
-    lv_obj_set_size(_grid, grid_w, grid_h);
-    lv_obj_set_pos(_grid, 8, grid_y);
-    lv_obj_set_style_bg_opa(_grid, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(_grid, 0, 0);
-    lv_obj_set_style_pad_all(_grid, 4, 0);
-    lv_obj_set_style_pad_gap(_grid, 8, 0);
-    lv_obj_clear_flag(_grid, LV_OBJ_FLAG_SCROLLABLE);
+    // ── Tileview horizontal (1 tuile = 1 page) ───────────────
+    _tileview = lv_tileview_create(_screen);
+    lv_obj_set_pos(_tileview, 0, tv_y);
+    lv_obj_set_size(_tileview, tv_w, tv_h);
+    lv_obj_set_style_bg_opa(_tileview, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(_tileview, 0, 0);
+    lv_obj_set_style_pad_all(_tileview, 0, 0);
+    // Scroll uniquement horizontal
+    lv_obj_set_scroll_dir(_tileview, LV_DIR_HOR);
+    // Supprimer la scrollbar visuelle
+    lv_obj_set_scrollbar_mode(_tileview, LV_SCROLLBAR_MODE_OFF);
 
-    static lv_coord_t col_dsc[] = {
-        LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
-        LV_GRID_TEMPLATE_LAST
-    };
-    static lv_coord_t row_dsc[] = {
-        LV_GRID_FR(1), LV_GRID_FR(1),
-        LV_GRID_TEMPLATE_LAST
-    };
-    lv_obj_set_grid_dsc_array(_grid, col_dsc, row_dsc);
-    lv_obj_set_layout(_grid, LV_LAYOUT_GRID);
+    // Page 0
+    lv_obj_t* page0 = lv_tileview_add_tile(_tileview, 0, 0, LV_DIR_HOR);
+    lv_obj_set_user_data(page0, (void*)(intptr_t)0);
+    _build_page(page0, TILES[0]);
 
-    for (int i = 0; i < N_TILES; i++) {
-        lv_obj_t* tile = lv_obj_create(_grid);
-        lv_obj_set_size(tile, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_grid_cell(tile,
-            LV_GRID_ALIGN_STRETCH, i % 3, 1,
-            LV_GRID_ALIGN_STRETCH, i / 3, 1);
+    // Page 1
+    lv_obj_t* page1 = lv_tileview_add_tile(_tileview, 1, 0, LV_DIR_HOR);
+    lv_obj_set_user_data(page1, (void*)(intptr_t)1);
+    _build_page(page1, TILES[1]);
 
-        lv_obj_set_style_bg_color(tile, lv_color_hex(0x1C1C2E), 0);
-        lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(tile, 16, 0);
-        lv_obj_set_style_border_width(tile, 1, 0);
-        lv_obj_set_style_border_color(tile, lv_color_hex(0x2A2A40), 0);
-        lv_obj_set_style_pad_all(tile, 0, 0);
-        lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
-        // Etat presse
-        lv_obj_set_style_bg_color(tile, lv_color_hex(0x2E2E50), LV_STATE_PRESSED);
-        lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
+    // Callback changement de page
+    lv_obj_add_event_cb(_tileview, _tileview_changed_cb,
+                        LV_EVENT_VALUE_CHANGED, nullptr);
 
-        // Icone (grande lettre centrée)
-        lv_obj_t* icon_lbl = lv_label_create(tile);
-        lv_label_set_text(icon_lbl, TILES[i].icon);
-        lv_obj_set_style_text_font(icon_lbl, &lv_font_montserrat_36, 0);
-        lv_obj_set_style_text_color(icon_lbl, lv_color_white(), 0);
-        lv_obj_align(icon_lbl, LV_ALIGN_CENTER, 0, -12);
+    // ── Indicateurs de page (2 points) ───────────────────────
+    int32_t dot_y = LV_VER_RES - DOT_AREA_H + (DOT_AREA_H - 8) / 2;
+    int32_t dot_spacing = 14;
+    int32_t dots_total  = 2 * 8 + dot_spacing;  // 2 dots de 8px + gap
+    int32_t dot_x_start = (LV_HOR_RES - dots_total) / 2;
 
-        // Nom de l'app
-        lv_obj_t* name_lbl = lv_label_create(tile);
-        lv_label_set_text(name_lbl, TILES[i].label);
-        lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(name_lbl, lv_color_hex(0xCCCCDD), 0);
-        lv_obj_align(name_lbl, LV_ALIGN_BOTTOM_MID, 0, -10);
-
-        lv_obj_add_event_cb(tile, _tile_tap_cb, LV_EVENT_CLICKED,
-                            (void*)&TILES[i]);
+    for (int i = 0; i < 2; i++) {
+        _dot[i] = lv_obj_create(_screen);
+        lv_obj_set_size(_dot[i], 8, 8);
+        lv_obj_set_pos(_dot[i], dot_x_start + i * (8 + dot_spacing), dot_y);
+        lv_obj_set_style_radius(_dot[i], LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_opa(_dot[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(_dot[i], 0, 0);
+        lv_obj_clear_flag(_dot[i], LV_OBJ_FLAG_SCROLLABLE);
     }
+    _update_dots(0);
 
     lv_scr_load(_screen);
     hal::display_force_refresh();
-    Serial.println("[UI] launcher OK — grille 3x2 avec touch LVGL");
+    Serial.println("[UI] launcher carousel OK — 2 pages swipables, dots, touch LVGL");
 }
 
 void ui_launcher_show() {
