@@ -3,15 +3,10 @@
 // CST9220 via SensorLib TouchDrv.hpp (API unifiee v0.4+)
 // TP_INT=GPIO11  TP_RST=GPIO2 (partage avec LCD_RST)
 //
+// fix: getPoint() deprecated => getTouchPoints() (SensorLib v0.4+)
+// fix: lv_event_get_target() retourne void* en LVGL9 => cast explicite
 // fix touch : setSwapXY(false) + setMirrorXY(false, false)
-//   => co5300 est maintenant en setRotation(0) sans rotation
-//   matérielle ; le touch n'a donc rien à compenser.
-//   Si l'image est toujours tournée, passer à
-//   LV_DISPLAY_ROTATION_90 dans display.cpp — LVGL remappera
-//   automatiquement les coordonnées touch via l'indev.
-//
-// fix LVGL9 : lv_indev_set_display() — OBLIGATOIRE pour lier
-//   l'indev au display actif (sinon events ignorés silencieusement)
+// fix LVGL9 : lv_indev_set_display() obliga toire
 // ============================================================
 #include <Arduino.h>
 #include "touch.h"
@@ -34,11 +29,12 @@ static void _lv_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
         data->state = LV_INDEV_STATE_RELEASED;
         return;
     }
-    int16_t x = 0, y = 0;
-    uint8_t touched = _touch.getPoint(&x, &y, 1);
+    int16_t x[1] = {0}, y[1] = {0};
+    // getTouchPoints() remplace getPoint() deprecie depuis SensorLib v0.4
+    uint8_t touched = _touch.getTouchPoints(x, y, 1);
     if (touched > 0) {
-        data->point.x = (lv_coord_t)x;
-        data->point.y = (lv_coord_t)y;
+        data->point.x = (lv_coord_t)x[0];
+        data->point.y = (lv_coord_t)y[0];
         data->state   = LV_INDEV_STATE_PRESSED;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
@@ -65,9 +61,6 @@ bool touch_init() {
         return false;
     }
 
-    // co5300 setRotation(0) => pas de rotation physique a compenser.
-    // Si passage a LV_DISPLAY_ROTATION_90, LVGL remappera le touch
-    // automatiquement via l'indev lie au display (lv_indev_set_display).
     _touch.setMaxCoordinates(LCD_WIDTH, LCD_HEIGHT);
     _touch.setSwapXY(false);
     _touch.setMirrorXY(false, false);
@@ -91,10 +84,11 @@ bool touch_init() {
 bool touch_read(uint16_t& x, uint16_t& y) {
 #if __has_include("TouchDrv.hpp")
     if (!_touch_ok) return false;
-    int16_t tx = 0, ty = 0;
-    if (_touch.getPoint(&tx, &ty, 1) > 0) {
-        x = (uint16_t)tx;
-        y = (uint16_t)ty;
+    int16_t tx[1] = {0}, ty[1] = {0};
+    // getTouchPoints() remplace getPoint() deprecie
+    if (_touch.getTouchPoints(tx, ty, 1) > 0) {
+        x = (uint16_t)tx[0];
+        y = (uint16_t)ty[0];
         return true;
     }
     return false;

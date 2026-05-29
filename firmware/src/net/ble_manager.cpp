@@ -1,16 +1,17 @@
 // ============================================================
 // ble_manager.cpp — GATT Server CompagnonV2 (NimBLE)
 //
-// Caractéristiques :
-//   WIFI_SCAN      2002  R/N  → liste réseaux JSON
-//   WIFI_PROVISION 2003  W    → SSID+pass JSON → NVS
-//   AGENT_SYNC     2004  R/W/N→ payload JSON bidirectionnel
-//   TEXT_INPUT     2005  W    → texte libre → orchestrateur
-//   LLM_RELAY      2006  R/W/N→ requête/réponse LLM sans WiFi
-//   DEVICE_STATUS  2007  R/N  → JSON status
-//   GPS            2008  R/N  → JSON lat/lon/alt
+// Caracteristiques :
+//   WIFI_SCAN      2002  R/N  => liste reseaux JSON
+//   WIFI_PROVISION 2003  W    => SSID+pass JSON => NVS
+//   AGENT_SYNC     2004  R/W/N=> payload JSON bidirectionnel
+//   TEXT_INPUT     2005  W    => texte libre => orchestrateur
+//   LLM_RELAY      2006  R/W/N=> requete/reponse LLM sans WiFi
+//   DEVICE_STATUS  2007  R/N  => JSON status
+//   GPS            2008  R/N  => JSON lat/lon/alt
 //
-// BLE name : NVS "ble_config"/"device_name" (PWA → AGENT_SYNC cmd)
+// fix: svc->start() deprecie dans NimBLE 2.x => supprime
+//      Les services sont demarres automatiquement par _server->start()
 // ============================================================
 #include "ble_manager.h"
 #include <NimBLEDevice.h>
@@ -115,7 +116,9 @@ void ble_init(TextInputCb on_text, AgentSyncCb on_agent, LlmRelayCb on_llm) {
     _chr_dev_status = make(CHR_DEV_STATUS, RN);
     _chr_gps        = make(CHR_GPS,        RN);
 
-    svc->start();
+    // NimBLE 2.x : svc->start() est deprecie et sans effet.
+    // Les services sont demarres implicitement par _server->start().
+    _server->start();
 
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     adv->addServiceUUID(SVC_MAIN);

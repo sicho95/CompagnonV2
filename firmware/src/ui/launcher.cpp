@@ -1,12 +1,11 @@
 // ============================================================
 // CompagnonV2 — ui/launcher.cpp
-// fix encodage   : LV_SYMBOL_* (glyphes intégrés LVGL) +
-//                  labels UTF-8 en raw string
-// fix status_bar : ui_status_bar_raise() après lv_scr_load()
-// fix grille     : 2 pages × 3 colonnes par page (2×3)
-//                  avec titre "CompagnonV2" centré ET status bar
-// fix navigation : tuiles clickables avec lancement app
-// fix compilation: LV_SYMBOL_CHART → LV_SYMBOL_CHARGE (n'existe pas dans LVGL)
+// fix encodage   : LV_SYMBOL_* (glyphes integres LVGL)
+// fix status_bar : ui_status_bar_raise() apres lv_scr_load()
+// fix LV_SYMBOL_CHART => LV_SYMBOL_CHARGE (n'existe pas dans LVGL)
+// fix void* cast : lv_event_get_target() retourne void* en LVGL9
+//                  => cast explicite (lv_obj_t*)
+// fix hex escape ui_reminders : placeholder UTF-8 inline
 // ============================================================
 #include "launcher.h"
 #include "status_bar.h"
@@ -21,20 +20,18 @@
 
 struct TileDesc {
     os::AppId   id;
-    const char* icon;   // LV_SYMBOL_* — glyphe intégré LVGL
-    const char* label;  // UTF-8
+    const char* icon;
+    const char* label;
 };
 
-// LV_SYMBOL_* : glyphes toujours disponibles dans la police built-in LVGL
-// LV_SYMBOL_CHART n'existe PAS dans LVGL — utiliser LV_SYMBOL_CHARGE à la place
 static const TileDesc PAGE0[3] = {
-    { os::AppId::NESTOR,  LV_SYMBOL_AUDIO,    "Nestor"  },
+    { os::AppId::NESTOR,  LV_SYMBOL_AUDIO,    "Nestor"   },
     { os::AppId::METEO,   LV_SYMBOL_HOME,     "M\xc3\xa9t\xc3\xa9o" },
-    { os::AppId::BOURSE,  LV_SYMBOL_CHARGE,   "Bourse"  },
+    { os::AppId::BOURSE,  LV_SYMBOL_CHARGE,   "Bourse"   },
 };
 static const TileDesc PAGE1[3] = {
-    { os::AppId::RADARS,  LV_SYMBOL_EYE_OPEN, "Radars"  },
-    { os::AppId::RAPPELS, LV_SYMBOL_BELL,     "Rappels" },
+    { os::AppId::RADARS,  LV_SYMBOL_EYE_OPEN, "Radars"   },
+    { os::AppId::RAPPELS, LV_SYMBOL_BELL,     "Rappels"  },
     { os::AppId::NONE,    LV_SYMBOL_SETTINGS, "R\xc3\xa9glages" },
 };
 
@@ -54,7 +51,8 @@ static void _update_dots(int page) {
 }
 
 static void _tileview_changed_cb(lv_event_t* e) {
-    lv_obj_t* tv   = lv_event_get_target(e);
+    // LVGL9 : lv_event_get_target() retourne void* => cast obligatoire
+    lv_obj_t* tv   = (lv_obj_t*)lv_event_get_target(e);
     lv_obj_t* tile = lv_tileview_get_tile_active(tv);
     int page = (int)(intptr_t)lv_obj_get_user_data(tile);
     _update_dots(page);
@@ -71,7 +69,6 @@ static void _tile_tap_cb(lv_event_t* e) {
     }
 }
 
-// Construit une page avec 3 tuiles en colonne
 static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3]) {
     lv_obj_t* cont = lv_obj_create(tv_tile);
     lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
@@ -82,12 +79,10 @@ static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3]) {
     lv_obj_set_style_pad_gap(cont, 8, 0);
     lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
-    // 3 colonnes egales
     static lv_coord_t col_dsc[] = {
         LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
         LV_GRID_TEMPLATE_LAST
     };
-    // 1 rangee (les 3 tuiles de cette page)
     static lv_coord_t row_dsc[] = {
         LV_GRID_FR(1),
         LV_GRID_TEMPLATE_LAST
@@ -111,14 +106,12 @@ static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3]) {
         lv_obj_set_style_bg_color(card, lv_color_hex(0x2E2E50), LV_STATE_PRESSED);
         lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
 
-        // Icone LV_SYMBOL (police built-in LVGL, toujours disponible)
         lv_obj_t* icon = lv_label_create(card);
         lv_label_set_text(icon, descs[i].icon);
         lv_obj_set_style_text_font(icon, &lv_font_montserrat_24, 0);
         lv_obj_set_style_text_color(icon, lv_color_white(), 0);
         lv_obj_align(icon, LV_ALIGN_CENTER, 0, -12);
 
-        // Label texte en bas
         lv_obj_t* lbl = lv_label_create(card);
         lv_label_set_text(lbl, descs[i].label);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
@@ -136,14 +129,12 @@ void ui_launcher_init() {
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(_screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Titre "CompagnonV2" centre en haut (sous la status bar)
     lv_obj_t* title = lv_label_create(_screen);
     lv_label_set_text(title, "CompagnonV2");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0x7EB8D4), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, STATUS_BAR_H + 6);
 
-    // TileView : commence apres status_bar + titre
     int32_t tv_y = STATUS_BAR_H + TITLE_H + 8;
     int32_t tv_h = LV_VER_RES - tv_y - DOT_AREA_H - 4;
     int32_t tv_w = LV_HOR_RES;
@@ -157,12 +148,10 @@ void ui_launcher_init() {
     lv_obj_set_scroll_dir(_tileview, LV_DIR_HOR);
     lv_obj_set_scrollbar_mode(_tileview, LV_SCROLLBAR_MODE_OFF);
 
-    // Page 0 : Nestor, Meteo, Bourse
     lv_obj_t* page0 = lv_tileview_add_tile(_tileview, 0, 0, LV_DIR_HOR);
     lv_obj_set_user_data(page0, (void*)(intptr_t)0);
     _build_page(page0, PAGE0);
 
-    // Page 1 : Radars, Rappels, Reglages
     lv_obj_t* page1 = lv_tileview_add_tile(_tileview, 1, 0, LV_DIR_HOR);
     lv_obj_set_user_data(page1, (void*)(intptr_t)1);
     _build_page(page1, PAGE1);
@@ -170,7 +159,6 @@ void ui_launcher_init() {
     lv_obj_add_event_cb(_tileview, _tileview_changed_cb,
                         LV_EVENT_VALUE_CHANGED, nullptr);
 
-    // Points de pagination (dots) en bas
     int32_t dot_y       = LV_VER_RES - DOT_AREA_H + (DOT_AREA_H - 8) / 2;
     int32_t dot_spacing = 14;
     int32_t dots_total  = 2 * 8 + dot_spacing;
@@ -188,9 +176,6 @@ void ui_launcher_init() {
     _update_dots(0);
 
     lv_scr_load(_screen);
-
-    // fix status_bar : raise APRES lv_scr_load() pour qu'elle
-    // reste au-dessus du nouveau screen charge
     ui_status_bar_raise();
 
     hal::display_force_refresh();
