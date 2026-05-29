@@ -1,3 +1,10 @@
+// ============================================================
+// CompagnonV2 — hal/display.cpp
+// fix rotation : LV_DISPLAY_ROTATION_270 (-90° anti-horaire)
+//   Le module Waveshare 2.16" AMOLED est monté avec +90° physique
+//   par rapport au repère GFX. LVGL corrige en appliquant -90°
+//   (ROTATION_270) ce qui produit un affichage portrait correct.
+// ============================================================
 #include "display.h"
 #include "drivers/co5300.h"
 #include "../../include/pins.h"
@@ -6,7 +13,7 @@
 
 #define DISP_W    LCD_WIDTH
 #define DISP_H    LCD_HEIGHT
-#define BUF_LINES 20   // réduit de 40→20 pour libérer ~55 KB heap BLE/WiFi
+#define BUF_LINES 20   // 20 lignes × 466px × 2 octets ≈ 18 KB/buffer
 
 static lv_display_t* s_disp = nullptr;
 static lv_color_t*   s_buf1 = nullptr;
@@ -35,7 +42,10 @@ void display_init() {
     lv_display_set_flush_cb(s_disp, flush_cb);
     lv_display_set_buffers(s_disp, s_buf1, s_buf2, buf_sz,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
-    lv_display_set_rotation(s_disp, LV_DISPLAY_ROTATION_0);
+
+    // ROTATION_270 = -90° anti-horaire dans LVGL9
+    // Corrige le décalage physique +90° du boîtier Waveshare 2.16" AMOLED.
+    lv_display_set_rotation(s_disp, LV_DISPLAY_ROTATION_270);
 
     Serial.printf("[DISPLAY] CO5300 QSPI \xe2\x80\x94 driver OK (%dx%d)\n"
                   "  CS=%d SCK=%d D0=%d D1=%d D2=%d D3=%d RST=%d\n"
@@ -48,7 +58,7 @@ void display_init() {
                   (unsigned)buf_sz);
 }
 
-lv_display_t* display_get() { return s_disp; }
+lv_display_t* display_get()    { return s_disp; }
 
 void display_set_brightness(uint8_t pct) {
     Arduino_CO5300* g = co5300::gfx();

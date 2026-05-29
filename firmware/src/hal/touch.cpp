@@ -3,15 +3,16 @@
 // CST9220 via SensorLib — TouchDrvCST92xx
 // TP_INT=GPIO11  TP_RST=GPIO2 (partage avec LCD_RST)
 //
-// SensorLib API history:
-//   < v0.4  : getPoint(int16_t* x, int16_t* y, uint8_t n) → uint8_t
-//   ≥ v0.4  : getTouchPoints(int16_t*, int16_t*, int)  [supprimé ensuite]
-//   master  : getTouchPoints() → const TouchPoints&
-//             .getPointCount()  .getPoint(i).x  .getPoint(i).y
+// fix rotation : setSwapXY(true) + setMirrorXY(false, true)
+//   Après LV_DISPLAY_ROTATION_270, les coordonnées hardware
+//   du CST9220 sont en portrait natif (X=0..479, Y=0..479).
+//   LVGL les attend en paysage logique post-rotation :
+//     X hardware → Y logique  (swap)
+//     Y hardware → X logique  (mirror Y)
 //
-// On utilise en priorité la nouvelle API objet (master/v0.5+).
-// Fallback automatique sur getPoint() si SENSOR_LIB_VERSION < 0x000500
-// ou si le symbole n'est pas disponible.
+// fix SensorLib API (master / v0.5+) :
+//   getTouchPoints() → const TouchPoints&
+//   .getPointCount()  .getPoint(i).x  .getPoint(i).y
 //
 // fix LVGL9 : lv_indev_set_display() obligatoire
 // ============================================================
@@ -30,17 +31,13 @@
 
 static lv_indev_t* s_indev = nullptr;
 
-// ── LVGL touch callback ────────────────────────────────────────────────────
+// ── LVGL touch read callback ───────────────────────────────────────────────
 static void _lv_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
 #if __has_include("TouchDrv.hpp")
     if (!_touch_ok) {
         data->state = LV_INDEV_STATE_RELEASED;
         return;
     }
-
-    // Nouvelle API SensorLib (master / ≥ v0.5) :
-    //   const TouchPoints& getTouchPoints()
-    //   .getPointCount() .getPoint(i).x .getPoint(i).y
     const TouchPoints& pts = _touch.getTouchPoints();
     if (pts.getPointCount() > 0) {
         const TouchPoint& p = pts.getPoint(0);
@@ -74,15 +71,21 @@ bool touch_init() {
     }
 
     _touch.setMaxCoordinates(LCD_WIDTH, LCD_HEIGHT);
-    _touch.setSwapXY(false);
-    _touch.setMirrorXY(false, false);
 
+    // Compensation de la rotation LVGL_DISPLAY_ROTATION_270 :
+    //   Le panel CST9220 livre X=0..479 (gauche→droite en portrait)
+    //              et          Y=0..479 (haut→bas en portrait).
+    //   Après rotation -90° (ROTATION_270) LVGL attend :
+    //     point.x = Y_hardware  (swap X↔Y)
+    //     point.y = MAX - X_hardware  (miroir sur le nouvel axe Y)
+    _touch.setSwapXY(true);
+    _touch.setMirrorXY(false, true);
+
+    // Créer et enregistrer l'indev LVGL
     s_indev = lv_indev_create();
     lv_indev_set_type(s_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(s_indev, _lv_touch_read_cb);
-
-    // LVGL9 — OBLIGATOIRE : lie l'indev au display actif
-    lv_indev_set_display(s_indev, hal::display_get());
+    lv_indev_set_display(s_indev, hal::display_get()); // LVGL9 obligatoire
 
     Serial.printf("[TOUCH] CST9220 OK \xe2\x80\x94 %s (RST=%d INT=%d)\n",
                   _touch.getModelName(), PIN_TP_RST, PIN_TP_INT);
@@ -93,7 +96,6 @@ bool touch_init() {
 #endif
 }
 
-// ── Lecture ponctuelle (hors LVGL) ─────────────────────────────────────────
 bool touch_read(uint16_t& x, uint16_t& y) {
 #if __has_include("TouchDrv.hpp")
     if (!_touch_ok) return false;

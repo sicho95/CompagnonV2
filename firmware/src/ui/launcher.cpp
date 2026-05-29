@@ -1,22 +1,20 @@
 // ============================================================
 // CompagnonV2 — ui/launcher.cpp
-// fix encodage   : LV_SYMBOL_* (glyphes integres LVGL)
-// fix status_bar : ui_status_bar_raise() apres lv_scr_load()
-// fix LV_SYMBOL_CHART => LV_SYMBOL_CHARGE (n'existe pas dans LVGL)
-// fix void* cast : lv_event_get_target() retourne void* en LVGL9
-//                  => cast explicite (lv_obj_t*)
-// fix hex escape ui_reminders : placeholder UTF-8 inline
+// fix : suppression du titre 'CompagnonV2' (doublon status bar)
+// fix : navigation boutons +/- PMU via ui_launcher_btn_tick()
+//       + = page suivante  /  - = page précédente
+//       appui long = relancé par PMU cb
 // ============================================================
 #include "launcher.h"
 #include "status_bar.h"
 #include "../hal/display.h"
+#include "../hal/pmu.h"
 #include "../system/os_kernel.h"
 #include <lvgl.h>
 #include <Arduino.h>
 
 #define STATUS_BAR_H  28
 #define DOT_AREA_H    18
-#define TITLE_H       28
 
 struct TileDesc {
     os::AppId   id;
@@ -39,19 +37,37 @@ static lv_obj_t* _screen   = nullptr;
 static lv_obj_t* _tileview = nullptr;
 static lv_obj_t* _dot[2]   = {};
 static int       _cur_page = 0;
+static int       _num_pages = 2;
 
 static const lv_color_t DOT_ACTIVE   = LV_COLOR_MAKE(0x4F, 0xC3, 0xF7);
 static const lv_color_t DOT_INACTIVE = LV_COLOR_MAKE(0x33, 0x33, 0x55);
 
 static void _update_dots(int page) {
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < _num_pages; i++)
         lv_obj_set_style_bg_color(_dot[i],
             (i == page) ? DOT_ACTIVE : DOT_INACTIVE, 0);
     _cur_page = page;
 }
 
+static void _go_to_page(int page) {
+    if (!_tileview) return;
+    if (page < 0) page = 0;
+    if (page >= _num_pages) page = _num_pages - 1;
+    // Récupère la tile cible et scrolle vers elle
+    lv_obj_t* tile = lv_tileview_get_tile_act(_tileview);
+    // Scroll programmatique : on cherche la tile en col=page, row=0
+    uint32_t n = lv_obj_get_child_count(_tileview);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t* child = lv_obj_get_child(_tileview, (int32_t)i);
+        if ((int)(intptr_t)lv_obj_get_user_data(child) == page) {
+            lv_tileview_set_tile(child, LV_ANIM_ON);
+            break;
+        }
+    }
+    _update_dots(page);
+}
+
 static void _tileview_changed_cb(lv_event_t* e) {
-    // LVGL9 : lv_event_get_target() retourne void* => cast obligatoire
     lv_obj_t* tv   = (lv_obj_t*)lv_event_get_target(e);
     lv_obj_t* tile = lv_tileview_get_tile_active(tv);
     int page = (int)(intptr_t)lv_obj_get_user_data(tile);
@@ -129,13 +145,9 @@ void ui_launcher_init() {
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(_screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t* title = lv_label_create(_screen);
-    lv_label_set_text(title, "CompagnonV2");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0x7EB8D4), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, STATUS_BAR_H + 6);
+    // Pas de titre ici — il est dans la status_bar (évite le doublon)
 
-    int32_t tv_y = STATUS_BAR_H + TITLE_H + 8;
+    int32_t tv_y = STATUS_BAR_H + 4;
     int32_t tv_h = LV_VER_RES - tv_y - DOT_AREA_H - 4;
     int32_t tv_w = LV_HOR_RES;
 
@@ -159,12 +171,13 @@ void ui_launcher_init() {
     lv_obj_add_event_cb(_tileview, _tileview_changed_cb,
                         LV_EVENT_VALUE_CHANGED, nullptr);
 
+    // Dots de pagination
     int32_t dot_y       = LV_VER_RES - DOT_AREA_H + (DOT_AREA_H - 8) / 2;
     int32_t dot_spacing = 14;
-    int32_t dots_total  = 2 * 8 + dot_spacing;
+    int32_t dots_total  = _num_pages * 8 + (_num_pages - 1) * dot_spacing;
     int32_t dot_x_start = (LV_HOR_RES - dots_total) / 2;
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < _num_pages; i++) {
         _dot[i] = lv_obj_create(_screen);
         lv_obj_set_size(_dot[i], 8, 8);
         lv_obj_set_pos(_dot[i], dot_x_start + i * (8 + dot_spacing), dot_y);
@@ -176,7 +189,7 @@ void ui_launcher_init() {
     _update_dots(0);
 
     lv_scr_load(_screen);
-    ui_status_bar_raise();
+    ui_status_bar_raise();   // status bar au premier plan après scr_load
 
     hal::display_force_refresh();
     Serial.println("[UI] launcher carousel OK");
@@ -189,4 +202,14 @@ void ui_launcher_show() {
     }
 }
 
-void ui_launcher_btn_tick() {}
+// ── Navigation boutons physiques PMU (+/-) ─────────────────────────────────
+// Appelé depuis task_os_main() toutes les ~100 ms via hal_pmu_tick().
+// hal_pmu_btn_pressed(PMU_BTN_PLUS)  = bouton VOL+ du AXP2101
+// hal_pmu_btn_pressed(PMU_BTN_MINUS) = bouton VOL-
+void ui_launcher_btn_tick() {
+    if (hal_pmu_btn_pressed(PMU_BTN_PLUS)) {
+        _go_to_page(_cur_page + 1);
+    } else if (hal_pmu_btn_pressed(PMU_BTN_MINUS)) {
+        _go_to_page(_cur_page - 1);
+    }
+}
