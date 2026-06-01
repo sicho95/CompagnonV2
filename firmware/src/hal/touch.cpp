@@ -1,9 +1,9 @@
 // ============================================================
 // CompagnonV2 — hal/touch.cpp
 // CST9220 via SensorLib 0.4.1 — namespace hal
-// getPoint() est déprécié mais c'est la seule API disponible
-// en 0.4.1 (getTouchPoints attend des int16_t[], pas de struct).
-// On supprime le warning pour éviter l'erreur -Wdeprecated.
+// IMPORTANT : PIN_TP_INT doit être configuré en INPUT avant
+// l'init du driver, sinon isPressed() lit une valeur flottante
+// et retourne toujours false.
 // ============================================================
 #include "touch.h"
 #include "../../include/pins.h"
@@ -16,12 +16,22 @@ static TouchDrvCST92xx _drv;
 static bool _ok = false;
 
 bool hal::touch_init() {
-    Wire.begin(PIN_IIC_SDA, PIN_IIC_SCL);
+    // Configurer les GPIO touch avant l'init du driver
+    pinMode(PIN_TP_INT, INPUT);   // CST9220 active-low interrupt
+    pinMode(PIN_TP_RST, OUTPUT);
+    digitalWrite(PIN_TP_RST, HIGH);
+    delay(10);
+    digitalWrite(PIN_TP_RST, LOW);
+    delay(20);
+    digitalWrite(PIN_TP_RST, HIGH);
+    delay(100);  // attente stabilisation CST9220 post-reset
+
+    // Wire déjà init par PMU — ne pas rappeler Wire.begin()
     if (_drv.begin(Wire, CST92XX_SLAVE_ADDRESS, PIN_TP_RST, PIN_TP_INT)) {
         _drv.setSwapXY(false);
         _drv.setMirrorXY(false, false);
         _ok = true;
-        Serial.printf("[TOUCH] CST9220 OK \u2014 %s (RST=%d INT=%d)\n",
+        Serial.printf("[TOUCH] CST9220 OK — %s (RST=%d INT=%d)\n",
                       _drv.getModelName(), PIN_TP_RST, PIN_TP_INT);
     } else {
         _ok = false;
@@ -36,8 +46,6 @@ bool hal::touch_read(uint16_t& x, uint16_t& y) {
     if (_drv.isPressed()) {
         int16_t tx[1] = {0};
         int16_t ty[1] = {0};
-        // Suppression du warning deprecated pour getPoint en 0.4.1
-        // (getTouchPoints n'existe pas encore comme méthode publique)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         uint8_t n = _drv.getPoint(tx, ty, 1);

@@ -1,11 +1,8 @@
 // ============================================================
 // CompagnonV2 — net/wifi_mgr.cpp
-// Namespace WifiMgr (B1 — était net::, harmonisé avec le .h)
-// B2  — syncNtp() expose wifi_get_ntp_epoch() correctement
-// Fix #4  — setenv(TZ) pour fuseau local
-// Fix #6  — vTaskDelay dans retry loop
-// Fix #11 — NTP timeout 500ms max
-// W2  — tick() pour mise à jour état connexion
+// Fix OOM : si aucun SSID configuré, on n'appelle PAS
+// startAP() ni esp_wifi_init() pour éviter la boucle
+// ESP_ERR_NO_MEM. L'AP ne sera démarrée que si init réussit.
 // ============================================================
 #include "wifi_mgr.h"
 #include "../storage/nvs_store.h"
@@ -16,12 +13,13 @@
 #define WIFI_RETRY_COUNT    10
 #define WIFI_RETRY_DELAY_MS 1000
 #define NTP_RETRY_COUNT     5
-#define NTP_RETRY_DELAY_MS  100   // 5 × 100ms = 500ms max
+#define NTP_RETRY_DELAY_MS  100
 
 namespace WifiMgr {
 
-static bool _connected = false;
-static bool _ap_mode   = false;
+static bool _connected  = false;
+static bool _ap_mode    = false;
+static bool _wifi_up    = false;  // true si esp_wifi_init a réussi
 
 static WifiConnectedCb    _cb_connected;
 static WifiDisconnectedCb _cb_disconnected;
@@ -31,36 +29,47 @@ void setCallbacks(WifiConnectedCb onConnected, WifiDisconnectedCb onDisconnected
     _cb_disconnected = onDisconnected;
 }
 
-// ── Save credentials (depuis BLE / PWA) ─────────────────────
 void saveCredentials(const String& ssid, const String& pass) {
     NvsStore::setString("wifi", "ssid", ssid);
     NvsStore::setString("wifi", "pass", pass);
 }
 
-// ── Fallback AP ───────────────────────────────────────────────
-void startAP() {
+// Démarre l'AP uniquement si WiFi.mode() réussit
+static bool _startAP() {
     String ssid = NvsStore::getString("wifi", "ap_ssid", "Compagnon-AP");
     String pass = NvsStore::getString("wifi", "ap_pass", "compagnon2024");
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(ssid.c_str(), pass.c_str());
-    _ap_mode = true;
+    if (!WiFi.mode(WIFI_AP)) {
+        Serial.println("[WIFI] AP: WiFi.mode(WIFI_AP) failed — skip");
+        return false;
+    }
+    if (!WiFi.softAP(ssid.c_str(), pass.c_str())) {
+        Serial.println("[WIFI] AP: softAP failed — skip");
+        return false;
+    }
+    _ap_mode  = true;
+    _wifi_up  = true;
     Serial.printf("[WIFI] AP mode: SSID=%s IP=%s\n",
         ssid.c_str(), WiFi.softAPIP().toString().c_str());
+    return true;
 }
 
-// ── Connexion STA ─────────────────────────────────────────────
 bool connect() {
     String ssid = NvsStore::getString("wifi", "ssid", "");
     String pass = NvsStore::getString("wifi", "pass", "");
 
     if (ssid.isEmpty()) {
-        Serial.println("[WIFI] No SSID configured → AP mode");
-        startAP();
+        // Pas de SSID : on tente l'AP une seule fois sans retry
+        Serial.println("[WIFI] No SSID — trying AP mode (one shot)");
+        _startAP();
         return false;
     }
 
     Serial.printf("[WIFI] Connecting to %s\n", ssid.c_str());
-    WiFi.mode(WIFI_STA);
+    if (!WiFi.mode(WIFI_STA)) {
+        Serial.println("[WIFI] WiFi.mode(WIFI_STA) failed");
+        return false;
+    }
+    _wifi_up = true;
     WiFi.setAutoReconnect(true);
     WiFi.begin(ssid.c_str(), pass.c_str());
 
@@ -74,26 +83,24 @@ bool connect() {
             return true;
         }
         vTaskDelay(pdMS_TO_TICKS(WIFI_RETRY_DELAY_MS));
-        Serial.print(".");
     }
 
-    Serial.println("\n[WIFI] Failed to connect → AP mode");
-    startAP();
+    Serial.println("[WIFI] Failed to connect — AP fallback");
+    _startAP();
     return false;
 }
 
-// ── Reconnexion forcée (nouvelles credentials via BLE) ───────
 void reconnect() {
-    WiFi.disconnect(true);
+    if (_wifi_up) WiFi.disconnect(true);
     _connected = false;
     _ap_mode   = false;
-    vTaskDelay(pdMS_TO_TICKS(200));
+    _wifi_up   = false;
+    vTaskDelay(pdMS_TO_TICKS(500));
     connect();
 }
 
-// ── Tick (W2 — appeler depuis task_network) ──────────────────
 void tick() {
-    if (_ap_mode) return;
+    if (!_wifi_up || _ap_mode) return;
     bool now_connected = (WiFi.status() == WL_CONNECTED);
     if (!_connected && now_connected) {
         _connected = true;
@@ -108,19 +115,13 @@ void tick() {
 
 bool isConnected() { return (_connected && WiFi.status() == WL_CONNECTED); }
 
-// ── NTP sync (B2 — exposé publiquement, appelé après connexion)
-// Fix #4 — timezone depuis NVS (défaut Paris CET/CEST)
-// Fix #11 — timeout réduit : NTP_RETRY_COUNT × NTP_RETRY_DELAY_MS
 time_t syncNtp() {
     if (!isConnected()) return 0;
-
     configTime(0, 0, "pool.ntp.org", "time.google.com");
-
     String tz = NvsStore::getString("system", "timezone",
                                     "CET-1CEST,M3.5.0,M10.5.0/3");
     setenv("TZ", tz.c_str(), 1);
     tzset();
-
     struct tm ti;
     for (int i = 0; i < NTP_RETRY_COUNT; i++) {
         if (getLocalTime(&ti, NTP_RETRY_DELAY_MS)) {

@@ -1,14 +1,6 @@
 // ============================================================
 // CompagnonV2 — system/os_main.cpp
-// Corrections :
-//   1. lv_indev_create pour le touch CST9220 → LVGL reçoit
-//      les événements tactiles et les dispatch aux widgets
-//   2. WiFi OOM : délai 10s + esp_bt_controller_mem_release
-//      pour libérer ~60KB de RAM BT Classic avant init WiFi
-//   3. app_launch thread-safe : passage par intent_queue
-//      (LVGL + kernel tournent tous deux sur Core 1 mais
-//      app_launch venant d'un btn_tick est déjà sur Core 1
-//      — on ajoute lock LVGL pour lv_scr_load_anim)
+// Touch indev LVGL + WiFi sans boucle AP échec OOM
 // ============================================================
 #include "os_main.h"
 #include "os_kernel.h"
@@ -26,7 +18,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_wifi.h>
-#include <esp_bt.h>
 #include <Arduino.h>
 
 namespace os {
@@ -44,13 +35,19 @@ static void _touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
         data->point.x = (int32_t)x;
         data->point.y = (int32_t)y;
         data->state   = LV_INDEV_STATE_PRESSED;
+        // Log de debug touch (ligne à retirer une fois validé)
+        static uint32_t _last_log = 0;
+        if (millis() - _last_log > 200) {
+            Serial.printf("[TOUCH] x=%d y=%d\n", x, y);
+            _last_log = millis();
+        }
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }
 }
 
 static void task_ui_lvgl(void*) {
-    // Enregistrement du périphérique d'entrée touch
+    // Enregistrement périphérique touch LVGL
     lv_indev_t* touch_indev = lv_indev_create();
     lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(touch_indev, _touch_read_cb);
@@ -101,13 +98,8 @@ static void task_ble(void*) {
 }
 
 static void task_network(void*) {
-    // Attente 10s : laisser BLE s'initialiser complètement
-    // avant de demander la RAM WiFi (évite ESP_ERR_NO_MEM)
+    // Attente 10s pour laisser BLE s'initialiser
     vTaskDelay(pdMS_TO_TICKS(10000));
-
-    // Libère la RAM BT Classic (~60KB) non utilisée par NimBLE
-    esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
-
     esp_wifi_set_ps(WIFI_PS_NONE);
 
     WifiMgr::setCallbacks(
