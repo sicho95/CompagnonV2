@@ -1,6 +1,7 @@
 // ============================================================
 // CompagnonV2 — system/os_main.cpp
-// Touch indev LVGL + WiFi sans boucle AP échec OOM
+// Fix thread-safety LVGL : dispatch_flush() dans task_ui_lvgl
+// Fix WiFi : stop reconnect quand pas de SSID
 // ============================================================
 #include "os_main.h"
 #include "os_kernel.h"
@@ -9,6 +10,7 @@
 #include "../ui/status_bar.h"
 #include "../ui/launcher.h"
 #include "../ui/notification_mgr.h"
+#include "../ui/ui_dispatch.h"
 #include "../net/wifi_mgr.h"
 #include "../net/ble_manager.h"
 #include "../storage/reminder_store.h"
@@ -28,14 +30,13 @@ static TaskHandle_t _h_voice = nullptr;
 static TaskHandle_t _h_ble   = nullptr;
 static TaskHandle_t _h_net   = nullptr;
 
-// ── LVGL input device : touch CST9220 ──────────────────────
+// —— Touch read callback ——
 static void _touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     uint16_t x = 0, y = 0;
     if (hal::touch_read(x, y)) {
         data->point.x = (int32_t)x;
         data->point.y = (int32_t)y;
         data->state   = LV_INDEV_STATE_PRESSED;
-        // Log de debug touch (ligne à retirer une fois validé)
         static uint32_t _last_log = 0;
         if (millis() - _last_log > 200) {
             Serial.printf("[TOUCH] x=%d y=%d\n", x, y);
@@ -46,8 +47,10 @@ static void _touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     }
 }
 
+// —— Tâche LVGL (Core 1) — SEULE à appeler des fonctions LVGL ——
 static void task_ui_lvgl(void*) {
-    // Enregistrement périphérique touch LVGL
+    ui::dispatch_init();
+
     lv_indev_t* touch_indev = lv_indev_create();
     lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(touch_indev, _touch_read_cb);
@@ -56,6 +59,7 @@ static void task_ui_lvgl(void*) {
     ui_launcher_init();
     Serial.println("[UI] LVGL task ready");
     for (;;) {
+        ui::dispatch_flush();   // exécute les lv_scr_load postés par os_kernel
         lv_timer_handler();
         ui_launcher_btn_tick();
         vTaskDelay(pdMS_TO_TICKS(5));
@@ -98,7 +102,6 @@ static void task_ble(void*) {
 }
 
 static void task_network(void*) {
-    // Attente 10s pour laisser BLE s'initialiser
     vTaskDelay(pdMS_TO_TICKS(10000));
     esp_wifi_set_ps(WIFI_PS_NONE);
 
@@ -120,12 +123,13 @@ static void task_network(void*) {
         },
         []() { Serial.println("[NET] WiFi disconnected"); }
     );
-    WifiMgr::connect();
+    bool ok = WifiMgr::connect();
     Serial.println("[NET] task started");
     for (;;) {
         WifiMgr::tick();
         vTaskDelay(pdMS_TO_TICKS(30000));
-        if (!WifiMgr::isConnected())
+        // Ne tenter reconnect que si WiFi a déjà réussi à s'initialiser
+        if (ok && !WifiMgr::isConnected())
             WifiMgr::reconnect();
     }
 }

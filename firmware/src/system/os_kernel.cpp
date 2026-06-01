@@ -1,10 +1,7 @@
 // ============================================================
 // CompagnonV2 — system/os_kernel.cpp
-// Fix 1 — namespace voice:: bridgé vers voice_engine_* (C API)
-// Fix 2 — AppDesc aligné avec os_kernel.h
-// B5  — static String _api_key
-// R4  — fix iterator invalidation dans kernel_tick()
-// fix: const Reminder* (getById retourne const)
+// Fix thread-safety : app_launch poste lv_scr_load_anim
+// via ui::dispatch_post() au lieu de l'appeler directement.
 // ============================================================
 #include "os_kernel.h"
 #include "../hal/rtc.h"
@@ -19,6 +16,8 @@
 #include "../storage/nvs_store.h"
 #include "../system/scheduler.h"
 #include "../ui/notification_mgr.h"
+#include "../ui/launcher.h"
+#include "../ui/ui_dispatch.h"
 #include "../voice/voice_engine.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -76,21 +75,42 @@ bool app_launch(AppId id) {
     if (id == AppId::NONE || (int)id >= (int)AppId::COUNT) return false;
     AppDesc& desc = _apps[(int)id];
     if (!desc.instance) return false;
+
+    // Pause app courante (OK depuis task_os_main, pas d'appel LVGL ici)
     if (_current_app != AppId::NONE && _apps[(int)_current_app].instance)
         _apps[(int)_current_app].instance->onPause();
+
+    // Init si premier lancement (construction LVGL widgets)
+    // init() crée les objets LVGL mais PAS de lv_scr_load → OK ici
     if (!_initialized[(int)id]) {
         desc.instance->init();
         _initialized[(int)id] = true;
     }
+
     _current_app = id;
-    desc.instance->onResume();
+
+    // onResume() contient lv_scr_load_anim → doit s'exécuter dans
+    // task_ui_lvgl. On le poste via la dispatch queue.
+    AppBase* inst = desc.instance;
+    bool posted = ui::dispatch_post([inst]() {
+        inst->onResume();
+    });
+    if (!posted) {
+        Serial.println("[KERNEL] dispatch_post FULL — onResume dropped");
+    }
+    Serial.printf("[KERNEL] app_launch %d → dispatch posted\n", (int)id);
     return true;
 }
 
 void app_close_current() {
     if (_current_app == AppId::NONE) return;
-    _apps[(int)_current_app].instance->onPause();
+    AppBase* inst = _apps[(int)_current_app].instance;
     _current_app = AppId::NONE;
+    // Retour au launcher depuis le bon thread
+    ui::dispatch_post([inst]() {
+        if (inst) inst->onPause();
+        ui_launcher_show();
+    });
 }
 
 AppId    app_current()              { return _current_app; }
@@ -108,9 +128,9 @@ void kernel_set_silent(bool s) {
     NvsStore::setBool(NVS_NS, NVS_SILENT, s);
     voice::set_mute(s);
 }
-bool kernel_is_silent()           { return _silent; }
-void kernel_set_time_valid(bool v) { _time_valid = v; }
-bool kernel_time_is_valid()        { return _time_valid; }
+bool kernel_is_silent()            { return _silent; }
+void kernel_set_time_valid(bool v)  { _time_valid = v; }
+bool kernel_time_is_valid()         { return _time_valid; }
 
 void kernel_schedule_next_reminder() {
     time_t next = _app_rappels.nextEpoch();
