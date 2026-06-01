@@ -1,8 +1,6 @@
 // ============================================================
 // CompagnonV2 — net/wifi_mgr.cpp
-// Fix OOM : si aucun SSID configuré, on n'appelle PAS
-// startAP() ni esp_wifi_init() pour éviter la boucle
-// ESP_ERR_NO_MEM. L'AP ne sera démarrée que si init réussit.
+// Sans SSID : tente AP une fois, sans retry.
 // ============================================================
 #include "wifi_mgr.h"
 #include "../storage/nvs_store.h"
@@ -19,7 +17,7 @@ namespace WifiMgr {
 
 static bool _connected  = false;
 static bool _ap_mode    = false;
-static bool _wifi_up    = false;  // true si esp_wifi_init a réussi
+static bool _wifi_up    = false;
 
 static WifiConnectedCb    _cb_connected;
 static WifiDisconnectedCb _cb_disconnected;
@@ -34,7 +32,6 @@ void saveCredentials(const String& ssid, const String& pass) {
     NvsStore::setString("wifi", "pass", pass);
 }
 
-// Démarre l'AP uniquement si WiFi.mode() réussit
 static bool _startAP() {
     String ssid = NvsStore::getString("wifi", "ap_ssid", "Compagnon-AP");
     String pass = NvsStore::getString("wifi", "ap_pass", "compagnon2024");
@@ -46,8 +43,8 @@ static bool _startAP() {
         Serial.println("[WIFI] AP: softAP failed — skip");
         return false;
     }
-    _ap_mode  = true;
-    _wifi_up  = true;
+    _ap_mode = true;
+    _wifi_up = true;
     Serial.printf("[WIFI] AP mode: SSID=%s IP=%s\n",
         ssid.c_str(), WiFi.softAPIP().toString().c_str());
     return true;
@@ -56,14 +53,10 @@ static bool _startAP() {
 bool connect() {
     String ssid = NvsStore::getString("wifi", "ssid", "");
     String pass = NvsStore::getString("wifi", "pass", "");
-
     if (ssid.isEmpty()) {
-        // Pas de SSID : on tente l'AP une seule fois sans retry
-        Serial.println("[WIFI] No SSID — trying AP mode (one shot)");
-        _startAP();
-        return false;
+        Serial.println("[WIFI] No SSID — skip WiFi entirely");
+        return false;  // pas d'AP, pas de retry, rien
     }
-
     Serial.printf("[WIFI] Connecting to %s\n", ssid.c_str());
     if (!WiFi.mode(WIFI_STA)) {
         Serial.println("[WIFI] WiFi.mode(WIFI_STA) failed");
@@ -72,7 +65,6 @@ bool connect() {
     _wifi_up = true;
     WiFi.setAutoReconnect(true);
     WiFi.begin(ssid.c_str(), pass.c_str());
-
     for (int i = 0; i < WIFI_RETRY_COUNT; i++) {
         if (WiFi.status() == WL_CONNECTED) {
             _connected = true;
@@ -84,14 +76,14 @@ bool connect() {
         }
         vTaskDelay(pdMS_TO_TICKS(WIFI_RETRY_DELAY_MS));
     }
-
     Serial.println("[WIFI] Failed to connect — AP fallback");
     _startAP();
     return false;
 }
 
 void reconnect() {
-    if (_wifi_up) WiFi.disconnect(true);
+    if (!_wifi_up) return;
+    WiFi.disconnect(true);
     _connected = false;
     _ap_mode   = false;
     _wifi_up   = false;
@@ -104,11 +96,9 @@ void tick() {
     bool now_connected = (WiFi.status() == WL_CONNECTED);
     if (!_connected && now_connected) {
         _connected = true;
-        Serial.println("[WIFI] Reconnected");
         if (_cb_connected) _cb_connected();
     } else if (_connected && !now_connected) {
         _connected = false;
-        Serial.println("[WIFI] Disconnected");
         if (_cb_disconnected) _cb_disconnected();
     }
 }

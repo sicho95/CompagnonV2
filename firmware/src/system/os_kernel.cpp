@@ -1,7 +1,7 @@
 // ============================================================
 // CompagnonV2 — system/os_kernel.cpp
-// Fix thread-safety : app_launch poste lv_scr_load_anim
-// via ui::dispatch_post() au lieu de l'appeler directement.
+// Fix: init() ET onResume() passent par dispatch_post_sync /
+// dispatch_post pour garantir l'exécution dans task_ui_lvgl.
 // ============================================================
 #include "os_kernel.h"
 #include "../hal/rtc.h"
@@ -76,29 +76,28 @@ bool app_launch(AppId id) {
     AppDesc& desc = _apps[(int)id];
     if (!desc.instance) return false;
 
-    // Pause app courante (OK depuis task_os_main, pas d'appel LVGL ici)
+    // Pause app courante — pas d'appel LVGL dans onPause() en général
     if (_current_app != AppId::NONE && _apps[(int)_current_app].instance)
         _apps[(int)_current_app].instance->onPause();
 
-    // Init si premier lancement (construction LVGL widgets)
-    // init() crée les objets LVGL mais PAS de lv_scr_load → OK ici
+    // init() crée les widgets LVGL → doit s'exécuter dans task_ui_lvgl
     if (!_initialized[(int)id]) {
-        desc.instance->init();
+        AppBase* inst = desc.instance;
+        ui::dispatch_post_sync([inst]() {
+            inst->init();
+        });
         _initialized[(int)id] = true;
     }
 
     _current_app = id;
 
-    // onResume() contient lv_scr_load_anim → doit s'exécuter dans
-    // task_ui_lvgl. On le poste via la dispatch queue.
+    // onResume() appelle lv_scr_load_anim → task_ui_lvgl
     AppBase* inst = desc.instance;
-    bool posted = ui::dispatch_post([inst]() {
+    ui::dispatch_post([inst]() {
         inst->onResume();
     });
-    if (!posted) {
-        Serial.println("[KERNEL] dispatch_post FULL — onResume dropped");
-    }
-    Serial.printf("[KERNEL] app_launch %d → dispatch posted\n", (int)id);
+
+    Serial.printf("[KERNEL] app_launch %d → init+resume dispatched\n", (int)id);
     return true;
 }
 
@@ -106,7 +105,6 @@ void app_close_current() {
     if (_current_app == AppId::NONE) return;
     AppBase* inst = _apps[(int)_current_app].instance;
     _current_app = AppId::NONE;
-    // Retour au launcher depuis le bon thread
     ui::dispatch_post([inst]() {
         if (inst) inst->onPause();
         ui_launcher_show();
