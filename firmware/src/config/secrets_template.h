@@ -9,9 +9,10 @@
 #pragma once
 
 // SSID optionnel pour dev (laisser vide en prod)
-#define DEV_WIFI_SSID ""
-#define DEV_WIFI_PASS ""
+#define DEV_WIFI_SSID            ""
+#define DEV_WIFI_PASS            ""
 
 // Clé API Météo-Concept (https://api.meteo-concept.com)
+// Remplace l'ancienne clé OpenWeatherMap (supprimée)
 // En prod : injectée via PWA → BLE → NVS (clé NVS : "meteo_key")
-#define DEV_METEO_CONCEPT_TOKEN ""
+#define DEV_METEO_CONCEPT_TOKEN  ""
