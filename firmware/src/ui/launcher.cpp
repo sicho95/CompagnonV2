@@ -1,9 +1,7 @@
 // ============================================================
 // CompagnonV2 — ui/launcher.cpp
 // fix : suppression du titre 'CompagnonV2' (doublon status bar)
-// fix : lv_tileview_set_tile() corrigé pour LVGL 9 (tile obj en 1er arg)
-// fix : suppression PMU_BTN_PLUS/MINUS (inexistants sur AXP2101)
-//       → navigation par swipe LVGL natif uniquement
+// fix : lv_tileview_set_tile() corrigé pour LVGL 9
 // fix : cast (lv_anim_enable_t) sur LV_ANIM_ON pour LVGL 9
 // refactor : UTF-8 littéral (plus de séquences \xNN)
 // ============================================================
