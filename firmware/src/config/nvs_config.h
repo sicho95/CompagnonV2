@@ -15,7 +15,7 @@
 #define NVS_KEY_SERPER      "serper_key"
 #define NVS_KEY_OPENROUTER  "openrtr_key"
 #define NVS_KEY_TWELVEDATA  "twdata_key"
-#define NVS_KEY_METEO       "meteo_key"
+#define NVS_KEY_METEO       "meteo_key"   // token Météo-Concept (api.meteo-concept.com)
 #define NVS_KEY_SPOTIFY_ID  "spotify_id"
 #define NVS_KEY_SPOTIFY_SEC "spotify_sec"
 #define NVS_KEY_TUYA_ID     "tuya_id"

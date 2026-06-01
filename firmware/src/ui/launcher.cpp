@@ -1,9 +1,8 @@
 // ============================================================
 // CompagnonV2 — ui/launcher.cpp
-// fix : suppression du titre 'CompagnonV2' (doublon status bar)
-// fix : lv_tileview_set_tile() corrigé pour LVGL 9
-// fix : cast (lv_anim_enable_t) sur LV_ANIM_ON pour LVGL 9
-// refactor : UTF-8 littéral (plus de séquences \xNN)
+// fix : lv_tileview_set_tile() LVGL 9 — 3 arguments requis
+//       (lv_obj_t* tv, lv_obj_t* tile, lv_anim_enable_t anim)
+// fix : UTF-8 littéraux propres
 // ============================================================
 #include "launcher.h"
 #include "status_bar.h"
@@ -24,13 +23,13 @@ struct TileDesc {
 
 static const TileDesc PAGE0[3] = {
     { os::AppId::NESTOR,  LV_SYMBOL_AUDIO,    "Nestor"   },
-    { os::AppId::METEO,   LV_SYMBOL_HOME,     "Météo"    },
+    { os::AppId::METEO,   LV_SYMBOL_HOME,     "M\xC3\xA9t\xC3\xA9o"    },
     { os::AppId::BOURSE,  LV_SYMBOL_CHARGE,   "Bourse"   },
 };
 static const TileDesc PAGE1[3] = {
     { os::AppId::RADARS,  LV_SYMBOL_EYE_OPEN, "Radars"   },
     { os::AppId::RAPPELS, LV_SYMBOL_BELL,     "Rappels"  },
-    { os::AppId::NONE,    LV_SYMBOL_SETTINGS, "Réglages" },
+    { os::AppId::NONE,    LV_SYMBOL_SETTINGS, "R\xC3\xA9glages" },
 };
 
 static lv_obj_t* _screen   = nullptr;
@@ -57,8 +56,9 @@ static void _go_to_page(int page) {
     for (uint32_t i = 0; i < n; i++) {
         lv_obj_t* child = lv_obj_get_child(_tileview, (int32_t)i);
         if ((int)(intptr_t)lv_obj_get_user_data(child) == page) {
-            // LVGL 9 : cast explicite requis (LV_ANIM_ON est bool en C++)
-            lv_tileview_set_tile(child, (lv_anim_enable_t)LV_ANIM_ON);
+            // LVGL 9 : lv_tileview_set_tile prend 3 arguments
+            // (tileview, tile, anim_enable)
+            lv_tileview_set_tile(_tileview, child, LV_ANIM_ON);
             break;
         }
     }
@@ -167,7 +167,6 @@ void ui_launcher_init() {
     lv_obj_add_event_cb(_tileview, _tileview_changed_cb,
                         LV_EVENT_VALUE_CHANGED, nullptr);
 
-    // Dots de pagination
     int32_t dot_y       = LV_VER_RES - DOT_AREA_H + (DOT_AREA_H - 8) / 2;
     int32_t dot_spacing = 14;
     int32_t dots_total  = _num_pages * 8 + (_num_pages - 1) * dot_spacing;
