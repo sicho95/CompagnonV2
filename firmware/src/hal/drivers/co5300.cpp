@@ -1,10 +1,10 @@
 // ============================================================
 // CompagnonV2 — drivers/co5300.cpp
 // CO5300 AMOLED QSPI — implémentation
-// fix rotation : setRotation(0) — aucune rotation matérielle
-// La rotation est gérée par LVGL (LV_DISPLAY_ROTATION_0) ;
-// superposer setRotation(1) GFX + LVGL_ROTATION_0 créait un
-// décalage de +90° visible sur le boîtier.
+// IMPORTANT : init en 480x480 PHYSIQUE.
+// L'offset boîtier (LCD_MARGIN_H/V) est appliqué dans display.cpp
+// lors du flush. Si le GFX est init en 440x460, draw16bitRGBBitmap
+// clampe les coords et l'image reste collée en haut-gauche.
 // ============================================================
 #include "co5300.h"
 
@@ -18,26 +18,21 @@ void init() {
         PIN_LCD_CS, PIN_LCD_SCLK,
         PIN_LCD_SIO0, PIN_LCD_SI1, PIN_LCD_SI2, PIN_LCD_SI3
     );
+    // Init en résolution physique complète 480x480
+    // (pas en zone utile 440x460)
     _gfx = new Arduino_CO5300(
         _bus, PIN_LCD_RST, 0,
-        LCD_WIDTH, LCD_HEIGHT, 0, 0, 0, 0
+        LCD_WIDTH_PHYS, LCD_HEIGHT_PHYS, 0, 0, 0, 0
     );
 
     if (!_gfx->begin()) {
         Serial.println("[CO5300] gfx->begin() FAILED");
         return;
     }
-
-    // Rotation 0 — pas de rotation matérielle GFX.
-    // Si l'image est physiquement tournée de 90° dans le boîtier,
-    // utiliser LV_DISPLAY_ROTATION_90 dans display.cpp (LVGL gère
-    // le re-mappage des coordonnées et du touch de manière cohérente).
     _gfx->setRotation(0);
-
-    _gfx->displayOn();        // MIPI 0x29 — obligatoire sinon écran noir
+    _gfx->displayOn();
     _gfx->setBrightness(200);
-    _gfx->fillScreen(0x0000); // fond noir avant premier flush LVGL
-
+    _gfx->fillScreen(0x0000);
     Serial.println("[CO5300] init OK — rotation=0");
 }
 
@@ -52,14 +47,14 @@ Arduino_CO5300* gfx() { return _gfx; }
 
 void sleep() {
     if (!_gfx) return;
-    _gfx->displayOff(); // MIPI 0x28
+    _gfx->displayOff();
     delay(5);
 }
 
 void wakeup() {
     if (!_gfx) return;
-    _gfx->displayOn();  // MIPI 0x29
-    delay(120);         // recovery time CO5300 datasheet
+    _gfx->displayOn();
+    delay(120);
 }
 
 } // namespace co5300
