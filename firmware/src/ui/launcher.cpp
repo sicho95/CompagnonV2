@@ -1,19 +1,29 @@
 // ============================================================
 // CompagnonV2 — ui/launcher.cpp
-// fix : lv_tileview_set_tile() LVGL 9 — 3 arguments requis
-//       (lv_obj_t* tv, lv_obj_t* tile, lv_anim_enable_t anim)
-// fix : UTF-8 littéraux propres
+// Carousel 2 pages + navigation physique (KEY3 / BOOT)
+//
+// Boutons (PIN_KEY3=GPIO18, PIN_BOOT_BTN=GPIO0) :
+//   KEY3  court  → page suivante (droite)
+//   BOOT  court  → page precedente (gauche)
+//   KEY3  long   → valider (lancer app selectionnee)
+//   BOOT  long   → retour / quitter app
+//
+// Labels ASCII pour eviter tout probleme d'encodage police.
+// Les 3 traits noirs etaient dus a buf_size incorrect (corrige
+// dans display.cpp).
 // ============================================================
 #include "launcher.h"
 #include "status_bar.h"
 #include "../hal/display.h"
 #include "../hal/pmu.h"
 #include "../system/os_kernel.h"
+#include "../../include/pins.h"
 #include <lvgl.h>
 #include <Arduino.h>
 
 #define STATUS_BAR_H  28
 #define DOT_AREA_H    18
+#define LONG_PRESS_MS 600
 
 struct TileDesc {
     os::AppId   id;
@@ -21,31 +31,46 @@ struct TileDesc {
     const char* label;
 };
 
+// Labels 100% ASCII — evite tout probleme de glyphe / encodage
 static const TileDesc PAGE0[3] = {
     { os::AppId::NESTOR,  LV_SYMBOL_AUDIO,    "Nestor"   },
-    { os::AppId::METEO,   LV_SYMBOL_HOME,     "M\xC3\xA9t\xC3\xA9o"    },
+    { os::AppId::METEO,   LV_SYMBOL_HOME,     "Meteo"    },
     { os::AppId::BOURSE,  LV_SYMBOL_CHARGE,   "Bourse"   },
 };
 static const TileDesc PAGE1[3] = {
     { os::AppId::RADARS,  LV_SYMBOL_EYE_OPEN, "Radars"   },
     { os::AppId::RAPPELS, LV_SYMBOL_BELL,     "Rappels"  },
-    { os::AppId::NONE,    LV_SYMBOL_SETTINGS, "R\xC3\xA9glages" },
+    { os::AppId::NONE,    LV_SYMBOL_SETTINGS, "Reglages" },
 };
 
 static lv_obj_t* _screen   = nullptr;
 static lv_obj_t* _tileview = nullptr;
 static lv_obj_t* _dot[2]   = {};
-static int       _cur_page = 0;
+static int       _cur_page  = 0;
+static int       _cur_card  = 0;
 static int       _num_pages = 2;
+
+static lv_obj_t* _cards[2][3] = {};
 
 static const lv_color_t DOT_ACTIVE   = LV_COLOR_MAKE(0x4F, 0xC3, 0xF7);
 static const lv_color_t DOT_INACTIVE = LV_COLOR_MAKE(0x33, 0x33, 0x55);
+static const lv_color_t CARD_SEL     = LV_COLOR_MAKE(0x1A, 0x6A, 0xA0);
+static const lv_color_t CARD_NORMAL  = LV_COLOR_MAKE(0x1C, 0x1C, 0x2E);
 
 static void _update_dots(int page) {
     for (int i = 0; i < _num_pages; i++)
         lv_obj_set_style_bg_color(_dot[i],
             (i == page) ? DOT_ACTIVE : DOT_INACTIVE, 0);
     _cur_page = page;
+}
+
+static void _highlight_card(int page, int card) {
+    for (int p = 0; p < _num_pages; p++)
+        for (int c = 0; c < 3; c++)
+            if (_cards[p][c])
+                lv_obj_set_style_bg_color(_cards[p][c],
+                    (p == page && c == card) ? CARD_SEL : CARD_NORMAL, 0);
+    _cur_card = card;
 }
 
 static void _go_to_page(int page) {
@@ -56,13 +81,12 @@ static void _go_to_page(int page) {
     for (uint32_t i = 0; i < n; i++) {
         lv_obj_t* child = lv_obj_get_child(_tileview, (int32_t)i);
         if ((int)(intptr_t)lv_obj_get_user_data(child) == page) {
-            // LVGL 9 : lv_tileview_set_tile prend 3 arguments
-            // (tileview, tile, anim_enable)
             lv_tileview_set_tile(_tileview, child, LV_ANIM_ON);
             break;
         }
     }
     _update_dots(page);
+    _highlight_card(page, _cur_card);
 }
 
 static void _tileview_changed_cb(lv_event_t* e) {
@@ -70,20 +94,30 @@ static void _tileview_changed_cb(lv_event_t* e) {
     lv_obj_t* tile = lv_tileview_get_tile_active(tv);
     int page = (int)(intptr_t)lv_obj_get_user_data(tile);
     _update_dots(page);
+    _highlight_card(page, _cur_card);
 }
 
-static void _tile_tap_cb(lv_event_t* e) {
-    auto* desc = (const TileDesc*)lv_event_get_user_data(e);
-    if (!desc) return;
-    if (desc->id != os::AppId::NONE) {
-        Serial.printf("[UI] launch app %d\n", (int)desc->id);
-        os::app_launch(desc->id);
+static void _launch_current() {
+    const TileDesc* descs = (_cur_page == 0) ? PAGE0 : PAGE1;
+    const TileDesc& d = descs[_cur_card];
+    if (d.id != os::AppId::NONE) {
+        Serial.printf("[UI] launch app %d (btn)\n", (int)d.id);
+        os::app_launch(d.id);
     } else {
         Serial.println("[UI] Reglages (TODO)");
     }
 }
 
-static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3]) {
+static void _tile_tap_cb(lv_event_t* e) {
+    auto* desc = (const TileDesc*)lv_event_get_user_data(e);
+    if (!desc) return;
+    if (desc->id != os::AppId::NONE)
+        os::app_launch(desc->id);
+    else
+        Serial.println("[UI] Reglages (TODO)");
+}
+
+static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3], int page_idx) {
     lv_obj_t* cont = lv_obj_create(tv_tile);
     lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
     lv_obj_set_pos(cont, 0, 0);
@@ -110,7 +144,7 @@ static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3]) {
         lv_obj_set_grid_cell(card,
             LV_GRID_ALIGN_STRETCH, i, 1,
             LV_GRID_ALIGN_STRETCH, 0, 1);
-        lv_obj_set_style_bg_color(card, lv_color_hex(0x1C1C2E), 0);
+        lv_obj_set_style_bg_color(card, CARD_NORMAL, 0);
         lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(card, 16, 0);
         lv_obj_set_style_border_width(card, 1, 0);
@@ -119,6 +153,8 @@ static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3]) {
         lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_style_bg_color(card, lv_color_hex(0x2E2E50), LV_STATE_PRESSED);
         lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+
+        _cards[page_idx][i] = card;
 
         lv_obj_t* icon = lv_label_create(card);
         lv_label_set_text(icon, descs[i].icon);
@@ -137,7 +173,49 @@ static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3]) {
     }
 }
 
+static uint32_t _key3_down_ms  = 0;
+static uint32_t _boot_down_ms  = 0;
+static bool     _key3_was_low  = false;
+static bool     _boot_was_low  = false;
+
+void ui_launcher_btn_tick() {
+    if (!_screen || lv_scr_act() != _screen) return;
+
+    uint32_t now = millis();
+
+    bool key3_low = (digitalRead(PIN_KEY3) == LOW);
+    if (key3_low && !_key3_was_low) {
+        _key3_down_ms = now;
+    } else if (!key3_low && _key3_was_low) {
+        uint32_t held = now - _key3_down_ms;
+        if (held >= LONG_PRESS_MS) {
+            _launch_current();
+        } else {
+            int next = (_cur_page + 1) % _num_pages;
+            _go_to_page(next);
+        }
+    }
+    _key3_was_low = key3_low;
+
+    bool boot_low = (digitalRead(PIN_BOOT_BTN) == LOW);
+    if (boot_low && !_boot_was_low) {
+        _boot_down_ms = now;
+    } else if (!boot_low && _boot_was_low) {
+        uint32_t held = now - _boot_down_ms;
+        if (held >= LONG_PRESS_MS) {
+            Serial.println("[UI] BOOT long → retour");
+        } else {
+            int prev = (_cur_page - 1 + _num_pages) % _num_pages;
+            _go_to_page(prev);
+        }
+    }
+    _boot_was_low = boot_low;
+}
+
 void ui_launcher_init() {
+    pinMode(PIN_KEY3,     INPUT_PULLUP);
+    pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
+
     _screen = lv_obj_create(nullptr);
     lv_obj_set_style_bg_color(_screen, lv_color_hex(0x0D0D1A), 0);
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
@@ -158,11 +236,11 @@ void ui_launcher_init() {
 
     lv_obj_t* page0 = lv_tileview_add_tile(_tileview, 0, 0, LV_DIR_HOR);
     lv_obj_set_user_data(page0, (void*)(intptr_t)0);
-    _build_page(page0, PAGE0);
+    _build_page(page0, PAGE0, 0);
 
     lv_obj_t* page1 = lv_tileview_add_tile(_tileview, 1, 0, LV_DIR_HOR);
     lv_obj_set_user_data(page1, (void*)(intptr_t)1);
-    _build_page(page1, PAGE1);
+    _build_page(page1, PAGE1, 1);
 
     lv_obj_add_event_cb(_tileview, _tileview_changed_cb,
                         LV_EVENT_VALUE_CHANGED, nullptr);
@@ -181,11 +259,11 @@ void ui_launcher_init() {
         lv_obj_set_style_border_width(_dot[i], 0, 0);
         lv_obj_clear_flag(_dot[i], LV_OBJ_FLAG_SCROLLABLE);
     }
+    _highlight_card(0, 0);
     _update_dots(0);
 
     lv_scr_load(_screen);
     ui_status_bar_raise();
-
     hal::display_force_refresh();
     Serial.println("[UI] launcher carousel OK");
 }

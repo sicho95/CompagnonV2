@@ -19,9 +19,18 @@
 #define PIN_LCD_RST        2
 #define PIN_LCD_TE         8
 
-// Résolution réelle CO5300 (source officielle Waveshare pin_config.h)
-#define LCD_WIDTH        466
-#define LCD_HEIGHT       466
+// Résolution physique réelle CO5300
+#define LCD_WIDTH_PHYS   480
+#define LCD_HEIGHT_PHYS  480
+
+// Marges boîtier (masque physique)
+// 2 × 20 px horizontal, 2 × 10 px vertical
+#define LCD_MARGIN_H      20
+#define LCD_MARGIN_V      10
+
+// Zone utile LVGL (ce que l'utilisateur voit)
+#define LCD_WIDTH        (LCD_WIDTH_PHYS  - 2 * LCD_MARGIN_H)   // 440
+#define LCD_HEIGHT       (LCD_HEIGHT_PHYS - 2 * LCD_MARGIN_V)   // 460
 
 // Aliases historiques
 #define PIN_QSPI_CS       PIN_LCD_CS
