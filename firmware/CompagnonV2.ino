@@ -40,15 +40,13 @@
 #include <WiFi.h>
 
 // secrets.h est dans include/ et dans .gitignore
-// Copier depuis include/secrets.h.template et remplir les valeurs
+// Copier depuis src/config/secrets_template.h et remplir les valeurs
 #if __has_include("secrets.h")
   #include "secrets.h"
   #define HAS_SECRETS
 #endif
 
-// ─── Provisionnement NVS au premier boot ───────────────────────────────────
-// Écrit les clés dans le NVS uniquement si elles sont encore vides.
-// La PWA peut ensuite les écraser via BLE sans réinitialisation.
+// ─── Provisionnement NVS au premier boot ─────────────────────────────────────────────
 static void secrets_provision() {
 #ifndef HAS_SECRETS
     Serial.println("[BOOT] secrets.h absent — provisionnement ignoré");
@@ -58,35 +56,32 @@ static void secrets_provision() {
     int written = 0;
 
     auto provision = [&](const char* key, const char* val) {
-        if (!val || val[0] == '\0') return;        // valeur vide → skip
+        if (!val || val[0] == '\0') return;
         char existing[128] = {};
-        if (nvs_get_api_key(key, existing, sizeof(existing))) return; // déjà set
+        if (nvs_get_api_key(key, existing, sizeof(existing))) return;
         nvs_set_api_key(key, val);
         Serial.printf("  [NVS] %s → écrit\n", key);
         written++;
     };
 
-    provision(NVS_KEY_GROQ,       SECRET_GROQ_API_KEY);
-    provision(NVS_KEY_GEMINI,     SECRET_GEMINI_KEY);
-    provision(NVS_KEY_SERPER,     SECRET_SERPER_KEY);
-    provision(NVS_KEY_OPENROUTER, SECRET_OPENROUTER_KEY);
-    provision(NVS_KEY_TWELVEDATA, SECRET_TWELVE_DATA_KEY);
-    provision(NVS_KEY_METEO,      SECRET_WEATHER_API_KEY);
-    provision(NVS_KEY_SPOTIFY_ID, SECRET_SPOTIFY_CLIENT_ID);
-    provision(NVS_KEY_SPOTIFY_SEC,SECRET_SPOTIFY_CLIENT_SEC);
-    provision(NVS_KEY_TUYA_ID,    SECRET_TUYA_ACCESS_ID);
-    provision(NVS_KEY_TUYA_SEC,   SECRET_TUYA_ACCESS_KEY);
-    provision(NVS_KEY_ECOVACS_U,  SECRET_ECOVACS_ACCOUNT);
-    provision(NVS_KEY_ECOVACS_P,  SECRET_ECOVACS_PASSWORD);
+    provision(NVS_KEY_GROQ,        SECRET_GROQ_API_KEY);
+    provision(NVS_KEY_GEMINI,      SECRET_GEMINI_KEY);
+    provision(NVS_KEY_SERPER,      SECRET_SERPER_KEY);
+    provision(NVS_KEY_OPENROUTER,  SECRET_OPENROUTER_KEY);
+    provision(NVS_KEY_TWELVEDATA,  SECRET_TWELVE_DATA_KEY);
+    provision(NVS_KEY_METEO,       DEV_METEO_CONCEPT_TOKEN);  // Météo-Concept
+    provision(NVS_KEY_SPOTIFY_ID,  SECRET_SPOTIFY_CLIENT_ID);
+    provision(NVS_KEY_SPOTIFY_SEC, SECRET_SPOTIFY_CLIENT_SEC);
+    provision(NVS_KEY_TUYA_ID,     SECRET_TUYA_ACCESS_ID);
+    provision(NVS_KEY_TUYA_SEC,    SECRET_TUYA_ACCESS_KEY);
+    provision(NVS_KEY_ECOVACS_U,   SECRET_ECOVACS_ACCOUNT);
+    provision(NVS_KEY_ECOVACS_P,   SECRET_ECOVACS_PASSWORD);
 
-    // WiFi via cfg_set_str (namespace séparé si besoin)
     {
         char existing[64] = {};
         if (!cfg_get_str("wifi_ssid", existing, sizeof(existing), "") || existing[0] == '\0') {
-            cfg_set_str("wifi_ssid", SECRET_WIFI_SSID);
-            cfg_set_str("wifi_pass", SECRET_WIFI_PASS);
-            cfg_set_str("ap_ssid",   SECRET_AP_SSID);
-            cfg_set_str("ap_pass",   SECRET_AP_PASS);
+            cfg_set_str("wifi_ssid", DEV_WIFI_SSID);
+            cfg_set_str("wifi_pass", DEV_WIFI_PASS);
             Serial.println("  [NVS] wifi → écrit");
             written++;
         }
@@ -99,7 +94,7 @@ static void secrets_provision() {
 #endif
 }
 
-// ─── Setup ─────────────────────────────────────────────────────────────────
+// ─── Setup ──────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
     delay(200);
@@ -117,7 +112,7 @@ void setup() {
     secrets_provision();
 
     // 4-7. Hardware suite
-    hal_display_init();   // lv_display_create() + flush_cb + buffers
+    hal_display_init();   // co5300::init() + lv_display_create() + buffers
     hal_touch_init();
     hal_imu_init();
     hal_audio_init();
@@ -134,9 +129,7 @@ void setup() {
     Serial.println("[BOOT] Prêt.");
 }
 
-// ─── Loop (Core 1) ─────────────────────────────────────────────────────────
-// lv_timer_handler() est dans task_ui_lvgl (prio 5).
-// Les tâches réseau/BLE/voice tournent en FreeRTOS — rien à faire ici.
+// ─── Loop (Core 1) ──────────────────────────────────────────────────────────────
 void loop() {
     hal_pmu_tick();
     power_mgr_tick();
