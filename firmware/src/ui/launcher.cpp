@@ -4,6 +4,7 @@
 // fix : lv_tileview_set_tile() corrigé pour LVGL 9 (tile obj en 1er arg)
 // fix : suppression PMU_BTN_PLUS/MINUS (inexistants sur AXP2101)
 //       → navigation par swipe LVGL natif uniquement
+// fix : cast (lv_anim_enable_t) sur LV_ANIM_ON pour LVGL 9
 // ============================================================
 #include "launcher.h"
 #include "status_bar.h"
@@ -59,7 +60,8 @@ static void _go_to_page(int page) {
         lv_obj_t* child = lv_obj_get_child(_tileview, (int32_t)i);
         if ((int)(intptr_t)lv_obj_get_user_data(child) == page) {
             // LVGL 9 : lv_tileview_set_tile(tile_obj, anim)
-            lv_tileview_set_tile(child, LV_ANIM_ON);
+            // LV_ANIM_ON est un bool en C++ ; cast explicite requis
+            lv_tileview_set_tile(child, (lv_anim_enable_t)LV_ANIM_ON);
             break;
         }
     }
