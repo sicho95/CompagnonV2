@@ -1,16 +1,13 @@
 // ============================================================
 // CompagnonV2 — hal/touch.cpp
-// CST9220 via SensorLib — namespace hal
-// Les coordonnées brutes CST9220 sont en 480x480 physique.
-// On les recadre dans la zone utile LVGL (440x460) en
-// soustrayant les marges boitier et en clampant.
+// CST9220 via SensorLib 0.4.1 — namespace hal
+// API 0.4.1 : setMirrorXY(x,y) et getTouchPoints()
+// Coords brutes 480x480 recadrées en zone utile LVGL 440x460.
 // ============================================================
 #include "touch.h"
 #include "../../include/pins.h"
 #include <Arduino.h>
 #include <Wire.h>
-
-// SensorLib >= 0.4.0 : inclure TouchDrv.hpp (CSTxxx unifié)
 #include <SensorLib.h>
 #include <TouchDrv.hpp>
 
@@ -21,8 +18,7 @@ bool hal::touch_init() {
     Wire.begin(PIN_IIC_SDA, PIN_IIC_SCL);
     if (_drv.begin(Wire, CST92XX_SLAVE_ADDRESS, PIN_TP_RST, PIN_TP_INT)) {
         _drv.setSwapXY(false);
-        _drv.setMirrorX(false);
-        _drv.setMirrorY(false);
+        _drv.setMirrorXY(false, false);  // SensorLib 0.4.1 : une seule méthode
         _ok = true;
         Serial.printf("[TOUCH] CST9220 OK — %s (RST=%d INT=%d)\n",
                       _drv.getModelName(), PIN_TP_RST, PIN_TP_INT);
@@ -37,10 +33,11 @@ bool hal::touch_init() {
 bool hal::touch_read(uint16_t& x, uint16_t& y) {
     if (!_ok) return false;
     if (_drv.isPressed()) {
-        int16_t tx, ty;
-        if (_drv.getPoint(&tx, &ty, 1) > 0) {
-            int32_t lx = (int32_t)tx - LCD_MARGIN_H;
-            int32_t ly = (int32_t)ty - LCD_MARGIN_V;
+        TouchData td[1];
+        uint8_t n = _drv.getTouchPoints(td, 1);  // SensorLib 0.4.1 : getTouchPoints
+        if (n > 0) {
+            int32_t lx = (int32_t)td[0].x - LCD_MARGIN_H;
+            int32_t ly = (int32_t)td[0].y - LCD_MARGIN_V;
             if (lx < 0) lx = 0;
             if (ly < 0) ly = 0;
             if (lx >= LCD_WIDTH)  lx = LCD_WIDTH  - 1;
