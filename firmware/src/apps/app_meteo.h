@@ -8,4 +8,6 @@ public:
     void        onResume() override;
     void        onPause()  override;
     const char* getName()  override { return "Meteo"; }
+private:
+    void        _fetch();
 };
