@@ -1,9 +1,9 @@
 // ============================================================
 // CompagnonV2 — ui/launcher.cpp
 // fix : suppression du titre 'CompagnonV2' (doublon status bar)
-// fix : navigation boutons +/- PMU via ui_launcher_btn_tick()
-//       + = page suivante  /  - = page précédente
-//       appui long = relancé par PMU cb
+// fix : lv_tileview_set_tile() corrigé pour LVGL 9 (tile obj en 1er arg)
+// fix : suppression PMU_BTN_PLUS/MINUS (inexistants sur AXP2101)
+//       → navigation par swipe LVGL natif uniquement
 // ============================================================
 #include "launcher.h"
 #include "status_bar.h"
@@ -53,13 +53,12 @@ static void _go_to_page(int page) {
     if (!_tileview) return;
     if (page < 0) page = 0;
     if (page >= _num_pages) page = _num_pages - 1;
-    // Récupère la tile cible et scrolle vers elle
-    lv_obj_t* tile = lv_tileview_get_tile_act(_tileview);
-    // Scroll programmatique : on cherche la tile en col=page, row=0
+    // Cherche la tile correspondant à l'index page
     uint32_t n = lv_obj_get_child_count(_tileview);
     for (uint32_t i = 0; i < n; i++) {
         lv_obj_t* child = lv_obj_get_child(_tileview, (int32_t)i);
         if ((int)(intptr_t)lv_obj_get_user_data(child) == page) {
+            // LVGL 9 : lv_tileview_set_tile(tile_obj, anim)
             lv_tileview_set_tile(child, LV_ANIM_ON);
             break;
         }
@@ -145,8 +144,6 @@ void ui_launcher_init() {
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(_screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Pas de titre ici — il est dans la status_bar (évite le doublon)
-
     int32_t tv_y = STATUS_BAR_H + 4;
     int32_t tv_h = LV_VER_RES - tv_y - DOT_AREA_H - 4;
     int32_t tv_w = LV_HOR_RES;
@@ -189,7 +186,7 @@ void ui_launcher_init() {
     _update_dots(0);
 
     lv_scr_load(_screen);
-    ui_status_bar_raise();   // status bar au premier plan après scr_load
+    ui_status_bar_raise();
 
     hal::display_force_refresh();
     Serial.println("[UI] launcher carousel OK");
@@ -199,17 +196,5 @@ void ui_launcher_show() {
     if (_screen) {
         lv_scr_load_anim(_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 200, 0, false);
         ui_status_bar_raise();
-    }
-}
-
-// ── Navigation boutons physiques PMU (+/-) ─────────────────────────────────
-// Appelé depuis task_os_main() toutes les ~100 ms via hal_pmu_tick().
-// hal_pmu_btn_pressed(PMU_BTN_PLUS)  = bouton VOL+ du AXP2101
-// hal_pmu_btn_pressed(PMU_BTN_MINUS) = bouton VOL-
-void ui_launcher_btn_tick() {
-    if (hal_pmu_btn_pressed(PMU_BTN_PLUS)) {
-        _go_to_page(_cur_page + 1);
-    } else if (hal_pmu_btn_pressed(PMU_BTN_MINUS)) {
-        _go_to_page(_cur_page - 1);
     }
 }

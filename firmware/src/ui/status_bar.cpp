@@ -4,6 +4,7 @@
 // Mise à jour chaque seconde via ui_status_bar_tick().
 // Créée sur lv_layer_top() — toujours au premier plan.
 // ui_status_bar_raise() à appeler après chaque lv_scr_load().
+// fix: hal_pmu_get_battery_percent() → hal_pmu_battery_pct()
 // ============================================================
 #include "status_bar.h"
 #include "../hal/pmu.h"
@@ -83,15 +84,10 @@ void ui_status_bar_tick() {
     bool ble_ok  = true;  // NimBLE actif dès le boot
 
     // Niveau batterie via PMU AXP2101
-    int  batt_pct = (int)hal_pmu_get_battery_percent();
-    char batt_chr = ' ';
-    if      (batt_pct >= 80) batt_chr = LV_SYMBOL_BATTERY_FULL[0];   // fallback text
-    else if (batt_pct >= 50) batt_chr = '3';
-    else if (batt_pct >= 20) batt_chr = '2';
-    else                     batt_chr = '1';
+    int batt_pct = hal_pmu_battery_pct();
 
     snprintf(icons, sizeof(icons), "%s %s %d%%",
-             wifi_ok ? LV_SYMBOL_WIFI    : LV_SYMBOL_CLOSE,
+             wifi_ok ? LV_SYMBOL_WIFI      : LV_SYMBOL_CLOSE,
              ble_ok  ? LV_SYMBOL_BLUETOOTH : "-",
              batt_pct);
     lv_label_set_text(_lbl_icons, icons);
