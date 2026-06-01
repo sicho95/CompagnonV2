@@ -10,16 +10,16 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-// SensorLib est toujours disponible dans ce projet
+// SensorLib >= 0.4.0 : inclure TouchDrv.hpp (CSTxxx unifié)
 #include <SensorLib.h>
-#include <TouchDrvCSTXXX.hpp>
+#include <TouchDrv.hpp>
 
-static TouchDrvCST92XX _drv;
+static TouchDrvCST92xx _drv;
 static bool _ok = false;
 
 bool hal::touch_init() {
     Wire.begin(PIN_IIC_SDA, PIN_IIC_SCL);
-    if (_drv.begin(Wire, CST9220_SLAVE_ADDRESS, PIN_TP_RST, PIN_TP_INT)) {
+    if (_drv.begin(Wire, CST92XX_SLAVE_ADDRESS, PIN_TP_RST, PIN_TP_INT)) {
         _drv.setSwapXY(false);
         _drv.setMirrorX(false);
         _drv.setMirrorY(false);
@@ -39,7 +39,6 @@ bool hal::touch_read(uint16_t& x, uint16_t& y) {
     if (_drv.isPressed()) {
         int16_t tx, ty;
         if (_drv.getPoint(&tx, &ty, 1) > 0) {
-            // Recadrage : coordonnees physiques → zone utile LVGL
             int32_t lx = (int32_t)tx - LCD_MARGIN_H;
             int32_t ly = (int32_t)ty - LCD_MARGIN_V;
             if (lx < 0) lx = 0;
