@@ -3,14 +3,12 @@
 // Carousel 2 pages + navigation physique (KEY3 / BOOT)
 //
 // Boutons (PIN_KEY3=GPIO18, PIN_BOOT_BTN=GPIO0) :
-//   KEY3  court  → page suivante (droite)
-//   BOOT  court  → page precedente (gauche)
-//   KEY3  long   → valider (lancer app selectionnee)
-//   BOOT  long   → retour / quitter app
+//   KEY3  court  → page suivante (droite)   [seulement si launcher visible]
+//   BOOT  court  → page précédente (gauche) [seulement si launcher visible]
+//   KEY3  long   → valider (lancer app sélectionnée) [seulement si launcher visible]
+//   BOOT  long   → fermer app courante (global, même si launcher pas visible)
 //
 // Labels ASCII pour eviter tout probleme d'encodage police.
-// Les 3 traits noirs etaient dus a buf_size incorrect (corrige
-// dans display.cpp).
 // ============================================================
 #include "launcher.h"
 #include "status_bar.h"
@@ -179,32 +177,51 @@ static bool     _key3_was_low  = false;
 static bool     _boot_was_low  = false;
 
 void ui_launcher_btn_tick() {
-    if (!_screen || lv_scr_act() != _screen) return;
+    // NOTE : pas de guard "lv_scr_act() == _screen" ici.
+    // BOOT long doit fonctionner même quand une app est active (écran != launcher).
+    // La condition launcher_active protège KEY3 et BOOT court (navigation carousel)
+    // pour éviter des changements de page fantômes quand le launcher est masqué.
+
+    if (!_screen) return;
+    bool launcher_active = (lv_scr_act() == _screen);
 
     uint32_t now = millis();
 
+    // —— KEY3 (GPIO18) ——
     bool key3_low = (digitalRead(PIN_KEY3) == LOW);
     if (key3_low && !_key3_was_low) {
         _key3_down_ms = now;
     } else if (!key3_low && _key3_was_low) {
-        uint32_t held = now - _key3_down_ms;
-        if (held >= LONG_PRESS_MS) {
-            _launch_current();
-        } else {
-            int next = (_cur_page + 1) % _num_pages;
-            _go_to_page(next);
+        if (launcher_active) {
+            uint32_t held = now - _key3_down_ms;
+            if (held >= LONG_PRESS_MS) {
+                // Long : lancer l'app sélectionnée
+                _launch_current();
+            } else {
+                // Court : page suivante (droite)
+                int next = (_cur_page + 1) % _num_pages;
+                _go_to_page(next);
+            }
         }
     }
     _key3_was_low = key3_low;
 
+    // —— BOOT (GPIO0) ——
     bool boot_low = (digitalRead(PIN_BOOT_BTN) == LOW);
     if (boot_low && !_boot_was_low) {
         _boot_down_ms = now;
     } else if (!boot_low && _boot_was_low) {
         uint32_t held = now - _boot_down_ms;
         if (held >= LONG_PRESS_MS) {
-            Serial.println("[UI] BOOT long → retour");
-        } else {
+            // Long : fermer l'app courante (global — fonctionne hors launcher)
+            if (os::app_current() != os::AppId::NONE) {
+                Serial.println("[UI] BOOT long -> app_close_current");
+                os::app_close_current();
+            } else {
+                Serial.println("[UI] BOOT long -> rien (launcher actif)");
+            }
+        } else if (launcher_active) {
+            // Court : page précédente (gauche), sens opposé à KEY3
             int prev = (_cur_page - 1 + _num_pages) % _num_pages;
             _go_to_page(prev);
         }

@@ -1,5 +1,7 @@
 // ============================================================
 // CompagnonV2 — system/os_main.cpp
+// Fix LVGL9 : lv_indev_set_display() obligatoire pour que le
+// touch soit rattaché au display et génère des événements.
 // Fix thread-safety LVGL : dispatch_flush() dans task_ui_lvgl
 // Fix WiFi : stop reconnect quand pas de SSID
 // ============================================================
@@ -51,9 +53,12 @@ static void _touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
 static void task_ui_lvgl(void*) {
     ui::dispatch_init();
 
+    // LVGL9 : l'indev DOIT être rattaché au display via lv_indev_set_display()
+    // Sans ça, le touch est créé mais LVGL ne lui envoie aucun événement.
     lv_indev_t* touch_indev = lv_indev_create();
     lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(touch_indev, _touch_read_cb);
+    lv_indev_set_display(touch_indev, lv_display_get_default());
 
     ui_status_bar_init();
     ui_launcher_init();

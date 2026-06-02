@@ -4,6 +4,8 @@
 // app_launch() poste UNE seule lambda fire-and-forget qui
 // exécute init() (première fois) + onResume() dans task_ui_lvgl.
 // task_os_main ne bloque plus jamais sur la queue UI.
+// Fix : _initialized[id] positionné DANS la lambda, après init()
+// réussi, pour éviter un flag "déjà init" si init() échoue.
 // ============================================================
 #include "os_kernel.h"
 #include "../hal/rtc.h"
@@ -84,16 +86,22 @@ bool app_launch(AppId id) {
         _apps[(int)_current_app].instance->onPause();
 
     _current_app = id;
-    bool already_init = _initialized[(int)id];
-    _initialized[(int)id] = true;
 
-    AppBase* inst = desc.instance;
+    // _initialized capturé par valeur pour que la lambda sache si c'est
+    // le premier lancement. On le passe à true DANS la lambda, APRES init(),
+    // pour éviter qu'un crash dans init() marque l'app comme initialisée.
+    bool already_init = _initialized[(int)id];
+    AppBase* inst     = desc.instance;
+    bool*    flag     = &_initialized[(int)id];
 
     // UNE seule lambda fire-and-forget dans task_ui_lvgl.
     // init() crée les widgets LVGL, onResume() charge l'écran.
     // Aucun blocage possible sur task_os_main.
-    ui::dispatch_post([inst, already_init]() {
-        if (!already_init) inst->init();
+    ui::dispatch_post([inst, already_init, flag]() {
+        if (!already_init) {
+            inst->init();
+            *flag = true;   // marqué seulement après init() réussi
+        }
         inst->onResume();
     });
 
