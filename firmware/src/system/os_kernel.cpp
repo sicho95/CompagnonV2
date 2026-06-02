@@ -1,7 +1,9 @@
 // ============================================================
 // CompagnonV2 — system/os_kernel.cpp
-// Fix: init() ET onResume() passent par dispatch_post_sync /
-// dispatch_post pour garantir l'exécution dans task_ui_lvgl.
+// Fix deadlock WDT : plus de dispatch_post_sync.
+// app_launch() poste UNE seule lambda fire-and-forget qui
+// exécute init() (première fois) + onResume() dans task_ui_lvgl.
+// task_os_main ne bloque plus jamais sur la queue UI.
 // ============================================================
 #include "os_kernel.h"
 #include "../hal/rtc.h"
@@ -76,28 +78,27 @@ bool app_launch(AppId id) {
     AppDesc& desc = _apps[(int)id];
     if (!desc.instance) return false;
 
-    // Pause app courante — pas d'appel LVGL dans onPause() en général
-    if (_current_app != AppId::NONE && _apps[(int)_current_app].instance)
+    // Pause app courante (pas de LVGL dans onPause en général)
+    if (_current_app != AppId::NONE && _current_app != id &&
+        _apps[(int)_current_app].instance)
         _apps[(int)_current_app].instance->onPause();
 
-    // init() crée les widgets LVGL → doit s'exécuter dans task_ui_lvgl
-    if (!_initialized[(int)id]) {
-        AppBase* inst = desc.instance;
-        ui::dispatch_post_sync([inst]() {
-            inst->init();
-        });
-        _initialized[(int)id] = true;
-    }
-
     _current_app = id;
+    bool already_init = _initialized[(int)id];
+    _initialized[(int)id] = true;
 
-    // onResume() appelle lv_scr_load_anim → task_ui_lvgl
     AppBase* inst = desc.instance;
-    ui::dispatch_post([inst]() {
+
+    // UNE seule lambda fire-and-forget dans task_ui_lvgl.
+    // init() crée les widgets LVGL, onResume() charge l'écran.
+    // Aucun blocage possible sur task_os_main.
+    ui::dispatch_post([inst, already_init]() {
+        if (!already_init) inst->init();
         inst->onResume();
     });
 
-    Serial.printf("[KERNEL] app_launch %d → init+resume dispatched\n", (int)id);
+    Serial.printf("[KERNEL] app_launch %d → dispatched (init=%s)\n",
+                  (int)id, already_init ? "skip" : "yes");
     return true;
 }
 
