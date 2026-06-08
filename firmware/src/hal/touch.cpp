@@ -15,6 +15,44 @@
 static TouchDrvCST92xx _drv;
 static bool _ok = false;
 
+static int32_t _clamp_i32(int32_t v, int32_t lo, int32_t hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+static void _map_touch_to_lvgl(int32_t raw_x, int32_t raw_y,
+                               uint16_t& x, uint16_t& y) {
+    int32_t rx = raw_x;
+    int32_t ry = raw_y;
+
+    switch (LCD_ROTATION & 3) {
+        case 1: {
+            int32_t t = rx;
+            rx = LCD_WIDTH_PHYS - 1 - ry;
+            ry = t;
+            break;
+        }
+        case 2:
+            rx = LCD_WIDTH_PHYS  - 1 - rx;
+            ry = LCD_HEIGHT_PHYS - 1 - ry;
+            break;
+        case 3: {
+            int32_t t = rx;
+            rx = ry;
+            ry = LCD_HEIGHT_PHYS - 1 - t;
+            break;
+        }
+        default:
+            break;
+    }
+
+    int32_t lx = rx - LCD_MARGIN_H;
+    int32_t ly = ry - LCD_MARGIN_V;
+    x = (uint16_t)_clamp_i32(lx, 0, LCD_WIDTH  - 1);
+    y = (uint16_t)_clamp_i32(ly, 0, LCD_HEIGHT - 1);
+}
+
 bool hal::touch_init() {
     // Configurer les GPIO touch avant l'init du driver
     pinMode(PIN_TP_INT, INPUT);   // CST9220 active-low interrupt
@@ -51,14 +89,7 @@ bool hal::touch_read(uint16_t& x, uint16_t& y) {
         uint8_t n = _drv.getPoint(tx, ty, 1);
 #pragma GCC diagnostic pop
         if (n > 0) {
-            int32_t lx = (int32_t)tx[0] - LCD_MARGIN_H;
-            int32_t ly = (int32_t)ty[0] - LCD_MARGIN_V;
-            if (lx < 0) lx = 0;
-            if (ly < 0) ly = 0;
-            if (lx >= LCD_WIDTH)  lx = LCD_WIDTH  - 1;
-            if (ly >= LCD_HEIGHT) ly = LCD_HEIGHT - 1;
-            x = (uint16_t)lx;
-            y = (uint16_t)ly;
+            _map_touch_to_lvgl(tx[0], ty[0], x, y);
             return true;
         }
     }
