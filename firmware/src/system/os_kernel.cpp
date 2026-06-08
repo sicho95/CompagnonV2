@@ -161,8 +161,6 @@ void kernel_tick() {
     if (_current_app != AppId::NONE && _apps[(int)_current_app].instance)
         _apps[(int)_current_app].instance->update();
 
-    ui::notification_tick();
-
     static uint32_t _last_alarm_poll = 0;
     uint32_t now_ms = millis();
     if (now_ms - _last_alarm_poll >= 1000) {
