@@ -63,9 +63,16 @@ static void task_ui_lvgl(void*) {
     ui_status_bar_init();
     ui_launcher_init();
     Serial.println("[UI] LVGL task ready");
+    uint32_t last_status_tick = 0;
     for (;;) {
         ui::dispatch_flush();   // exécute les lv_scr_load postés par os_kernel
         lv_timer_handler();
+        ui::notification_tick();
+        uint32_t now = millis();
+        if (now - last_status_tick >= 1000) {
+            last_status_tick = now;
+            ui_status_bar_tick();
+        }
         ui_launcher_btn_tick();
         vTaskDelay(pdMS_TO_TICKS(5));
     }
@@ -73,14 +80,8 @@ static void task_ui_lvgl(void*) {
 
 static void task_os_main(void*) {
     kernel_init();
-    uint32_t last_rtc_check = 0;
     for (;;) {
-        uint32_t now = millis();
         kernel_tick();
-        if (now - last_rtc_check >= 1000) {
-            last_rtc_check = now;
-            ui_status_bar_tick();
-        }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
