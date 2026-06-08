@@ -4,7 +4,7 @@
 // Overlay toast LVGL (bannière en haut de l'écran)
 // Appelé par os_kernel.cpp :
 //   ui::notification_post(label, duration_ms)
-//   ui::notification_tick()   — appel chaque kernel_tick()
+//   ui::notification_tick()   — appel dans task_ui_lvgl()
 // ============================================================
 #include <Arduino.h>
 #include <lvgl.h>
@@ -20,7 +20,7 @@ namespace ui {
 void notification_post(const String& message, uint32_t duration_ms = 5000);
 
 /**
- * À appeler dans kernel_tick() (~20 ms).
+ * À appeler dans task_ui_lvgl().
  * Gère l'expiration et le masquage automatique du toast.
  */
 void notification_tick();
