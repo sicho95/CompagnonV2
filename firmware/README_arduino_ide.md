@@ -28,7 +28,7 @@
 
 | Bibliothèque | Version |
 |---|---|
-| `LVGL` | `8.4.x` |
+| `LVGL` | `9.x` |
 | `ArduinoJson` | `7.x` |
 | `FFat` | incluse dans le core ESP32 |
 | `WiFiClientSecure` | incluse dans le core ESP32 |
