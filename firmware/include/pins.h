@@ -15,8 +15,8 @@
 #define PIN_LCD_SI1        5
 #define PIN_LCD_SI2        6
 #define PIN_LCD_SI3        7
-// RST partagé avec TP_RST — confirmé Waveshare pin_config.h
-#define PIN_LCD_RST        2
+// Reset ecran/touch separes sur le schema Waveshare.
+#define PIN_LCD_RST       39
 #define PIN_LCD_TE         8
 
 // Résolution physique réelle CO5300
@@ -32,6 +32,10 @@
 #define LCD_WIDTH        (LCD_WIDTH_PHYS  - 2 * LCD_MARGIN_H)   // 440
 #define LCD_HEIGHT       (LCD_HEIGHT_PHYS - 2 * LCD_MARGIN_V)   // 460
 
+// Orientation compensant l'affichage observe a +90 degres horaire.
+// Valeurs Arduino_GFX: 0=0, 1=90 CW, 2=180, 3=270 CW.
+#define LCD_ROTATION       3
+
 // Aliases historiques
 #define PIN_QSPI_CS       PIN_LCD_CS
 #define PIN_QSPI_SCK      PIN_LCD_SCLK
@@ -42,7 +46,7 @@
 
 // ── Touch CST9220 ─────────────────────────────────────────────
 #define PIN_TP_INT        11
-#define PIN_TP_RST         2
+#define PIN_TP_RST        40
 
 // ── RTC PCF85063 ──────────────────────────────────────────────
 #define PIN_RTC_INT       13
@@ -58,7 +62,7 @@
 #define QMI8658_I2C_ADDR 0x6B
 
 // ── I2S audio ES8311 / ES7210 ─────────────────────────────────
-#define PIN_I2S_MCLK      16
+#define PIN_I2S_MCLK      42
 #define PIN_I2S_SCLK       9
 #define PIN_I2S_LRCK      45
 #define PIN_ES8311_DIN     8
