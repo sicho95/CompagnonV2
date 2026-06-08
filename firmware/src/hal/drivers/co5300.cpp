@@ -29,11 +29,11 @@ void init() {
         Serial.println("[CO5300] gfx->begin() FAILED");
         return;
     }
-    _gfx->setRotation(0);
+    _gfx->setRotation(LCD_ROTATION);
     _gfx->displayOn();
     _gfx->setBrightness(200);
     _gfx->fillScreen(0x0000);
-    Serial.println("[CO5300] init OK — rotation=0");
+    Serial.printf("[CO5300] init OK — rotation=%d\n", LCD_ROTATION);
 }
 
 void flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
