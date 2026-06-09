@@ -32,9 +32,8 @@
 #define LCD_WIDTH        (LCD_WIDTH_PHYS  - 2 * LCD_MARGIN_H)   // 440
 #define LCD_HEIGHT       (LCD_HEIGHT_PHYS - 2 * LCD_MARGIN_V)   // 460
 
-// Orientation logicielle compensant l'affichage observe a +90 degres horaire.
-// Le CO5300 ne gere pas la rotation 90 degres en hardware.
-// Valeurs: 0=0, 3=90 degres anti-horaire.
+// Rotation CO5300/MADCTL. Le driver ne fait pas de vraie rotation 90 degres,
+// mais cette valeur conserve le mode d'affichage visible sur la carte.
 #define LCD_ROTATION       3
 
 // Aliases historiques
