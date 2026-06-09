@@ -32,8 +32,9 @@
 #define LCD_WIDTH        (LCD_WIDTH_PHYS  - 2 * LCD_MARGIN_H)   // 440
 #define LCD_HEIGHT       (LCD_HEIGHT_PHYS - 2 * LCD_MARGIN_V)   // 460
 
-// Orientation compensant l'affichage observe a +90 degres horaire.
-// Valeurs Arduino_GFX: 0=0, 1=90 CW, 2=180, 3=270 CW.
+// Orientation logicielle compensant l'affichage observe a +90 degres horaire.
+// Le CO5300 ne gere pas la rotation 90 degres en hardware.
+// Valeurs: 0=0, 3=90 degres anti-horaire.
 #define LCD_ROTATION       3
 
 // Aliases historiques
