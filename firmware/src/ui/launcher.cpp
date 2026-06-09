@@ -287,7 +287,8 @@ void ui_launcher_init() {
 
 void ui_launcher_show() {
     if (_screen) {
-        lv_scr_load_anim(_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 200, 0, false);
+        lv_scr_load(_screen);
         ui_status_bar_raise();
+        lv_obj_invalidate(lv_scr_act());
     }
 }
