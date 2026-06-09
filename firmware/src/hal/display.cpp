@@ -21,30 +21,10 @@
 static uint8_t*      _buf1  = nullptr;
 static uint8_t*      _buf2  = nullptr;
 static lv_display_t* _disp  = nullptr;
-static uint16_t      _rot_line[LCD_HEIGHT];
 
 // Flush callback : applique l'offset boitier avant d'envoyer au CO5300
 static void _flush_cb(lv_display_t* disp, const lv_area_t* area,
                       uint8_t* px_map) {
-#if (LCD_ROTATION == 3)
-    const uint16_t* src = (const uint16_t*)px_map;
-    int32_t src_w = area->x2 - area->x1 + 1;
-    int32_t src_h = area->y2 - area->y1 + 1;
-
-    // Rotation logicielle 90 degres anti-horaire.
-    // LVGL reste en 440x460 ; physiquement la zone devient 460x440,
-    // centree avec les marges inversees (x=10, y=20).
-    for (int32_t sx = 0; sx < src_w; sx++) {
-        for (int32_t sy = 0; sy < src_h; sy++) {
-            _rot_line[sy] = src[sy * src_w + sx];
-        }
-
-        int32_t phys_x1 = area->y1 + LCD_MARGIN_V;
-        int32_t phys_x2 = area->y2 + LCD_MARGIN_V;
-        int32_t phys_y  = (LCD_WIDTH - 1 - (area->x1 + sx)) + LCD_MARGIN_H;
-        co5300::flush(phys_x1, phys_y, phys_x2, phys_y, _rot_line);
-    }
-#else
     co5300::flush(
         area->x1 + LCD_MARGIN_H,
         area->y1 + LCD_MARGIN_V,
@@ -52,7 +32,6 @@ static void _flush_cb(lv_display_t* disp, const lv_area_t* area,
         area->y2 + LCD_MARGIN_V,
         (const uint16_t*)px_map
     );
-#endif
     lv_display_flush_ready(disp);
 }
 
