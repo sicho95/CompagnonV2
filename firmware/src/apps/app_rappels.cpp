@@ -93,8 +93,9 @@ void AppRappels::update() {}
 void AppRappels::onResume() {
     ReminderStore::load();
     _refresh_list();
-    lv_scr_load_anim(_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
+    lv_scr_load(_screen);
     ui_status_bar_raise();
+    lv_obj_invalidate(lv_scr_act());
     Serial.println("[Rappels] resume");
 }
 
