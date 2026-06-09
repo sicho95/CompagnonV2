@@ -29,11 +29,13 @@ void init() {
         Serial.println("[CO5300] gfx->begin() FAILED");
         return;
     }
-    _gfx->setRotation(LCD_ROTATION);
+    // CO5300 ne gere pas la rotation 90 degres en hardware.
+    // La correction d'orientation est faite dans hal/display.cpp.
+    _gfx->setRotation(0);
     _gfx->displayOn();
     _gfx->setBrightness(200);
     _gfx->fillScreen(0x0000);
-    Serial.printf("[CO5300] init OK — rotation=%d\n", LCD_ROTATION);
+    Serial.println("[CO5300] init OK — hw rotation=0");
 }
 
 void flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
