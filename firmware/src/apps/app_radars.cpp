@@ -1,5 +1,6 @@
 #include "app_radars.h"
 #include "../net/wifi_mgr.h"
+#include "../ui/status_bar.h"
 #include <lvgl.h>
 #include <Arduino.h>
 
@@ -106,7 +107,9 @@ void AppRadars::onResume() {
     if (_lbl_wifi)
         lv_label_set_text(_lbl_wifi,
             WifiMgr::isConnected() ? LV_SYMBOL_WIFI " En ligne" : LV_SYMBOL_CLOSE " Hors ligne");
-    lv_scr_load_anim(_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
+    lv_scr_load(_screen);
+    ui_status_bar_raise();
+    lv_obj_invalidate(lv_scr_act());
 }
 void AppRadars::update()  {}
 void AppRadars::onPause() {}
