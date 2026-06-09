@@ -39,9 +39,10 @@ void AppNestor::update() {}
 
 void AppNestor::onResume() {
     if (!_screen) return;
-    lv_scr_load_anim(_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
+    lv_scr_load(_screen);
     ui_status_bar_raise();
-    Serial.println("[Nestor] resume");
+    lv_obj_invalidate(lv_scr_act());
+    Serial.printf("[Nestor] resume scr=%p active=%p\n", _screen, lv_scr_act());
 }
 
 void AppNestor::onPause() {}
