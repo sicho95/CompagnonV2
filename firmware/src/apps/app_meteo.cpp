@@ -8,6 +8,7 @@
 // ============================================================
 #include "app_meteo.h"
 #include "../config/nvs_config.h"
+#include "../ui/status_bar.h"
 #include <lvgl.h>
 #include <Arduino.h>
 #include <HTTPClient.h>
@@ -141,7 +142,9 @@ void AppMeteo::init() {
 }
 
 void AppMeteo::onResume() {
-    lv_scr_load_anim(_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
+    lv_scr_load(_screen);
+    ui_status_bar_raise();
+    lv_obj_invalidate(lv_scr_act());
     _fetch();
 }
 
