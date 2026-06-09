@@ -23,16 +23,8 @@ static int32_t _clamp_i32(int32_t v, int32_t lo, int32_t hi) {
 
 static void _map_touch_to_lvgl(int32_t raw_x, int32_t raw_y,
                                uint16_t& x, uint16_t& y) {
-#if (LCD_ROTATION == 3)
-    // Inverse du flush logiciel 90 degres anti-horaire :
-    // phys_x = logical_y + LCD_MARGIN_V
-    // phys_y = (LCD_WIDTH - 1 - logical_x) + LCD_MARGIN_H
-    int32_t lx = (LCD_WIDTH - 1) - (raw_y - LCD_MARGIN_H);
-    int32_t ly = raw_x - LCD_MARGIN_V;
-#else
     int32_t lx = raw_x - LCD_MARGIN_H;
     int32_t ly = raw_y - LCD_MARGIN_V;
-#endif
     x = (uint16_t)_clamp_i32(lx, 0, LCD_WIDTH  - 1);
     y = (uint16_t)_clamp_i32(ly, 0, LCD_HEIGHT - 1);
 }
