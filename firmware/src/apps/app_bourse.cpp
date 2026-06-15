@@ -1,5 +1,6 @@
 #include "app_bourse.h"
 #include "../hal/display.h"
+#include "../ui/app_header.h"
 #include "../ui/status_bar.h"
 #include <lvgl.h>
 #include <Arduino.h>
@@ -25,10 +26,11 @@ void AppBourse::init() {
     _screen = lv_obj_create(nullptr);
     lv_obj_set_style_bg_color(_screen, lv_color_black(), 0);  // AMOLED
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
+    ui_app_header_attach(_screen);
 
     lv_obj_t* hdr = lv_obj_create(_screen);
     lv_obj_set_size(hdr, 480, 44);
-    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 36);
+    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, ui_app_header_bar_y());
     lv_obj_set_style_bg_color(hdr, lv_color_black(), 0);
     lv_obj_set_style_border_width(hdr, 1, 0);
     lv_obj_set_style_border_side(hdr, LV_BORDER_SIDE_BOTTOM, 0);
@@ -42,8 +44,8 @@ void AppBourse::init() {
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 8, 0);
 
     lv_obj_t* cont = lv_obj_create(_screen);
-    lv_obj_set_size(cont, 480, LV_VER_RES - 36 - 44 - 8);
-    lv_obj_align(cont, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_size(cont, 480, ui_app_content_height());
+    lv_obj_set_pos(cont, 0, ui_app_content_top());
     lv_obj_set_style_bg_color(cont, lv_color_black(), 0);  // AMOLED
     lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(cont, 0, 0);
