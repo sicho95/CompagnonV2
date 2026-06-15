@@ -1,4 +1,5 @@
 #include "app_bourse.h"
+#include "../hal/display.h"
 #include "../ui/status_bar.h"
 #include <lvgl.h>
 #include <Arduino.h>
@@ -96,6 +97,7 @@ void AppBourse::onResume() {
     lv_scr_load(_screen);
     ui_status_bar_raise();
     lv_obj_invalidate(lv_scr_act());
+    hal::display_force_refresh();
 }
 void AppBourse::update()  {}
 void AppBourse::onPause() {}
