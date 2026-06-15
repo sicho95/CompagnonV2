@@ -59,6 +59,7 @@ static void task_ui_lvgl(void*) {
     lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(touch_indev, _touch_read_cb);
     lv_indev_set_display(touch_indev, lv_display_get_default());
+    Serial.println("[TOUCH] LVGL probe armed");
 
     ui_status_bar_init();
     ui_launcher_init();
