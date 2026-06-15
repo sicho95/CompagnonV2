@@ -1,27 +1,31 @@
 // ============================================================
 // CompagnonV2 — ui/launcher.cpp
-// Carousel 2 pages + navigation physique (KEY3 / BOOT)
+// Launcher pagine type montre: grille 3x2, 6 icones par page.
 //
-// Boutons (PIN_KEY3=GPIO18, PIN_BOOT_BTN=GPIO0) :
-//   KEY3  court  → page suivante (droite)   [seulement si launcher visible]
-//   BOOT  court  → page précédente (gauche) [seulement si launcher visible]
-//   KEY3  long   → valider (lancer app sélectionnée) [seulement si launcher visible]
-//   BOOT  long   → fermer app courante (global, même si launcher pas visible)
-//
-// Labels ASCII pour eviter tout probleme d'encodage police.
+// Boutons:
+//   KEY3 court  -> selection suivante
+//   BOOT court  -> selection precedente
+//   KEY3 long   -> lancer l'app selectionnee
+//   BOOT long   -> fermer l'app courante
 // ============================================================
 #include "launcher.h"
 #include "status_bar.h"
 #include "../hal/display.h"
-#include "../hal/pmu.h"
 #include "../system/os_kernel.h"
+#include "../config/nvs_config.h"
 #include "../../include/pins.h"
 #include <lvgl.h>
 #include <Arduino.h>
 
-#define STATUS_BAR_H  28
-#define DOT_AREA_H    18
-#define LONG_PRESS_MS 600
+#define STATUS_BAR_H   28
+#define FOOTER_H       28
+#define PAGE_SIZE      6
+#define GRID_COLS      3
+#define GRID_ROWS      2
+#define LONG_PRESS_MS  600
+#define HOTSPOT_W      126
+#define HOTSPOT_H      164
+#define ICON_WELL_SZ   100
 
 struct TileDesc {
     os::AppId   id;
@@ -29,218 +33,356 @@ struct TileDesc {
     const char* label;
 };
 
-// Labels 100% ASCII — evite tout probleme de glyphe / encodage
-static const TileDesc PAGE0[3] = {
+static constexpr TileDesc APPS[] = {
     { os::AppId::NESTOR,  LV_SYMBOL_AUDIO,    "Nestor"   },
     { os::AppId::METEO,   LV_SYMBOL_HOME,     "Meteo"    },
     { os::AppId::BOURSE,  LV_SYMBOL_CHARGE,   "Bourse"   },
-};
-static const TileDesc PAGE1[3] = {
     { os::AppId::RADARS,  LV_SYMBOL_EYE_OPEN, "Radars"   },
     { os::AppId::RAPPELS, LV_SYMBOL_BELL,     "Rappels"  },
     { os::AppId::NONE,    LV_SYMBOL_SETTINGS, "Reglages" },
 };
 
-static lv_obj_t* _screen   = nullptr;
-static lv_obj_t* _tileview = nullptr;
-static lv_obj_t* _dot[2]   = {};
-static int       _cur_page  = 0;
-static int       _cur_card  = 0;
-static int       _num_pages = 2;
+static constexpr int APP_COUNT = (int)(sizeof(APPS) / sizeof(APPS[0]));
+static constexpr int PAGE_COUNT = (APP_COUNT + PAGE_SIZE - 1) / PAGE_SIZE;
 
-static lv_obj_t* _cards[2][3] = {};
+static lv_obj_t* _screen = nullptr;
+static lv_obj_t* _pages[PAGE_COUNT] = {};
+static lv_obj_t* _cards[PAGE_COUNT][PAGE_SIZE] = {};
+static lv_obj_t* _icon_wells[PAGE_COUNT][PAGE_SIZE] = {};
+static lv_obj_t* _labels[PAGE_COUNT][PAGE_SIZE] = {};
+static lv_obj_t* _dots[PAGE_COUNT] = {};
+static lv_obj_t* _bg_objs[16] = {};
+static uint8_t   _bg_obj_count = 0;
 
-static const lv_color_t DOT_ACTIVE   = LV_COLOR_MAKE(0x4F, 0xC3, 0xF7);
-static const lv_color_t DOT_INACTIVE = LV_COLOR_MAKE(0x33, 0x33, 0x55);
-static const lv_color_t CARD_SEL     = LV_COLOR_MAKE(0x1A, 0x6A, 0xA0);
-static const lv_color_t CARD_NORMAL  = LV_COLOR_MAKE(0x1C, 0x1C, 0x2E);
+static int _cur_page = 0;
+static int _cur_slot = 0;
 
-static void _update_dots(int page) {
-    for (int i = 0; i < _num_pages; i++)
-        lv_obj_set_style_bg_color(_dot[i],
-            (i == page) ? DOT_ACTIVE : DOT_INACTIVE, 0);
-    _cur_page = page;
+static const lv_color_t BG_TOP       = LV_COLOR_MAKE(0x00, 0x00, 0x00);
+static const lv_color_t BG_BOTTOM    = LV_COLOR_MAKE(0x00, 0x00, 0x00);
+static const lv_color_t CARD_ACTIVE  = LV_COLOR_MAKE(0x22, 0x2D, 0x4A);
+static const lv_color_t WELL_IDLE    = LV_COLOR_MAKE(0xF2, 0xF5, 0xFA);
+static const lv_color_t WELL_ACTIVE  = LV_COLOR_MAKE(0x66, 0xC7, 0xFF);
+static const lv_color_t LABEL_IDLE   = LV_COLOR_MAKE(0xDC, 0xE5, 0xF2);
+static const lv_color_t LABEL_ACTIVE = LV_COLOR_MAKE(0xFF, 0xFF, 0xFF);
+static const lv_color_t DOT_IDLE     = LV_COLOR_MAKE(0x45, 0x52, 0x70);
+static const lv_color_t DOT_ACTIVE   = LV_COLOR_MAKE(0xE8, 0xF3, 0xFF);
+
+static void _bg_track(lv_obj_t* obj) {
+    if (_bg_obj_count < (sizeof(_bg_objs) / sizeof(_bg_objs[0]))) {
+        _bg_objs[_bg_obj_count++] = obj;
+    }
 }
 
-static void _highlight_card(int page, int card) {
-    for (int p = 0; p < _num_pages; p++)
-        for (int c = 0; c < 3; c++)
-            if (_cards[p][c])
-                lv_obj_set_style_bg_color(_cards[p][c],
-                    (p == page && c == card) ? CARD_SEL : CARD_NORMAL, 0);
-    _cur_card = card;
+static lv_obj_t* _bg_circle(lv_obj_t* parent, int x, int y, int sz,
+                            lv_color_t color, lv_opa_t opa, int border_w) {
+    lv_obj_t* o = lv_obj_create(parent);
+    _bg_track(o);
+    lv_obj_set_size(o, sz, sz);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(o, border_w, 0);
+    lv_obj_set_style_border_color(o, color, 0);
+    lv_obj_set_style_border_opa(o, opa, 0);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    return o;
+}
+
+static lv_obj_t* _bg_rect(lv_obj_t* parent, int x, int y, int w, int h,
+                          lv_color_t color, lv_opa_t opa, int radius) {
+    lv_obj_t* o = lv_obj_create(parent);
+    _bg_track(o);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_style_radius(o, radius, 0);
+    lv_obj_set_style_bg_color(o, color, 0);
+    lv_obj_set_style_bg_opa(o, opa, 0);
+    lv_obj_set_style_border_width(o, 0, 0);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    return o;
+}
+
+static void _clear_background() {
+    for (uint8_t i = 0; i < _bg_obj_count; ++i) {
+        if (_bg_objs[i]) lv_obj_delete(_bg_objs[i]);
+        _bg_objs[i] = nullptr;
+    }
+    _bg_obj_count = 0;
+}
+
+static void _build_background(uint8_t style_id) {
+    _clear_background();
+    uint8_t style = style_id % 3;
+    if (style == 0) {
+        _bg_circle(_screen, 50, 70, 380, lv_color_hex(0x2E82FF), LV_OPA_30, 2);
+        _bg_circle(_screen, 92, 112, 296, lv_color_hex(0x67C3FF), LV_OPA_20, 2);
+        _bg_circle(_screen, 132, 152, 216, lv_color_hex(0x87E0FF), LV_OPA_30, 2);
+        _bg_rect(_screen, 238, 70, 2, 360, lv_color_hex(0x4FA9FF), LV_OPA_20, 0);
+        _bg_rect(_screen, 60, 248, 360, 2, lv_color_hex(0x4FA9FF), LV_OPA_20, 0);
+    } else if (style == 1) {
+        _bg_rect(_screen, 56, 110, 368, 4, lv_color_hex(0x72CAFF), LV_OPA_30, 2);
+        _bg_rect(_screen, 56, 370, 368, 4, lv_color_hex(0x72CAFF), LV_OPA_20, 2);
+        _bg_rect(_screen, 112, 64, 4, 352, lv_color_hex(0x72CAFF), LV_OPA_20, 2);
+        _bg_rect(_screen, 364, 64, 4, 352, lv_color_hex(0x72CAFF), LV_OPA_20, 2);
+        _bg_circle(_screen, 148, 148, 184, lv_color_hex(0xC8F2FF), LV_OPA_20, 1);
+        _bg_circle(_screen, 180, 180, 120, lv_color_hex(0xA2E8FF), LV_OPA_20, 1);
+    } else {
+        _bg_circle(_screen, -120, -60, 260, lv_color_hex(0x1A8CFF), LV_OPA_20, 3);
+        _bg_circle(_screen, 342, -40, 220, lv_color_hex(0x1A8CFF), LV_OPA_20, 3);
+        _bg_circle(_screen, -110, 272, 250, lv_color_hex(0x1A8CFF), LV_OPA_20, 3);
+        _bg_circle(_screen, 346, 294, 220, lv_color_hex(0x1A8CFF), LV_OPA_20, 3);
+        _bg_rect(_screen, 46, 52, 388, 376, lv_color_hex(0x0A1632), LV_OPA_10, 34);
+    }
+}
+
+static int _page_start_index(int page) {
+    return page * PAGE_SIZE;
+}
+
+static int _page_item_count(int page) {
+    int remain = APP_COUNT - _page_start_index(page);
+    return remain > PAGE_SIZE ? PAGE_SIZE : remain;
+}
+
+static int _linear_index() {
+    return _page_start_index(_cur_page) + _cur_slot;
+}
+
+static void _set_page_visible(int page) {
+    for (int i = 0; i < PAGE_COUNT; ++i) {
+        if (_pages[i]) {
+            if (i == page) lv_obj_clear_flag(_pages[i], LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(_pages[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+static void _update_dots() {
+    for (int i = 0; i < PAGE_COUNT; ++i) {
+        if (!_dots[i]) continue;
+        lv_obj_set_style_bg_color(_dots[i], i == _cur_page ? DOT_ACTIVE : DOT_IDLE, 0);
+        lv_obj_set_width(_dots[i], i == _cur_page ? 18 : 8);
+    }
+}
+
+static void _highlight_selection() {
+    for (int p = 0; p < PAGE_COUNT; ++p) {
+        int count = _page_item_count(p);
+        for (int i = 0; i < count; ++i) {
+            lv_obj_t* card = _cards[p][i];
+            lv_obj_t* well = _icon_wells[p][i];
+            if (!card || !well) continue;
+
+            bool selected = (p == _cur_page && i == _cur_slot);
+            lv_obj_set_style_bg_color(card, CARD_ACTIVE, 0);
+            lv_obj_set_style_bg_opa(card, selected ? LV_OPA_10 : LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(card, 0, 0);
+            lv_obj_set_style_shadow_width(card, 0, 0);
+
+            lv_obj_set_style_bg_color(well, selected ? WELL_ACTIVE : WELL_IDLE, 0);
+            lv_obj_set_style_text_color(well,
+                                        selected ? lv_color_hex(0x08111F) : lv_color_hex(0x1A2540),
+                                        0);
+            lv_obj_set_style_shadow_width(well, selected ? 22 : 0, 0);
+            lv_obj_set_style_shadow_opa(well, selected ? LV_OPA_30 : LV_OPA_TRANSP, 0);
+            lv_obj_set_style_shadow_color(well, lv_color_hex(0x5CCFFF), 0);
+            if (_labels[p][i]) {
+                lv_obj_set_style_text_color(_labels[p][i],
+                                            selected ? LABEL_ACTIVE : LABEL_IDLE, 0);
+            }
+        }
+    }
 }
 
 static void _sync_selection() {
-    _update_dots(_cur_page);
-    _highlight_card(_cur_page, _cur_card);
+    _set_page_visible(_cur_page);
+    _update_dots();
+    _highlight_selection();
     lv_obj_invalidate(_screen);
     hal::display_force_refresh();
-    Serial.printf("[UI] launcher sel page=%d card=%d\n", _cur_page, _cur_card);
+    Serial.printf("[UI] launcher sel page=%d slot=%d idx=%d\n",
+                  _cur_page, _cur_slot, _linear_index());
 }
 
-static void _go_to_page(int page) {
-    if (!_tileview) return;
-    if (page < 0) page = 0;
-    if (page >= _num_pages) page = _num_pages - 1;
-    uint32_t n = lv_obj_get_child_count(_tileview);
-    for (uint32_t i = 0; i < n; i++) {
-        lv_obj_t* child = lv_obj_get_child(_tileview, (int32_t)i);
-        if ((int)(intptr_t)lv_obj_get_user_data(child) == page) {
-            lv_tileview_set_tile(_tileview, child, LV_ANIM_OFF);
-            break;
-        }
-    }
-    _cur_page = page;
+static void _set_selection_from_linear(int linear) {
+    const int total = APP_COUNT;
+    if (linear < 0) linear = total - 1;
+    if (linear >= total) linear = 0;
+    _cur_page = linear / PAGE_SIZE;
+    _cur_slot = linear % PAGE_SIZE;
     _sync_selection();
 }
 
 static void _move_selection(int delta) {
-    int linear = _cur_page * 3 + _cur_card + delta;
-    const int total = _num_pages * 3;
-    if (linear < 0) linear = total - 1;
-    if (linear >= total) linear = 0;
-
-    int next_page = linear / 3;
-    int next_card = linear % 3;
-    bool page_changed = (next_page != _cur_page);
-
-    _cur_page = next_page;
-    _cur_card = next_card;
-
-    if (page_changed) {
-        _go_to_page(_cur_page);
-    } else {
-        _sync_selection();
-    }
+    _set_selection_from_linear(_linear_index() + delta);
 }
 
-static void _tileview_changed_cb(lv_event_t* e) {
-    lv_obj_t* tv   = (lv_obj_t*)lv_event_get_target(e);
-    lv_obj_t* tile = lv_tileview_get_tile_active(tv);
-    int page = (int)(intptr_t)lv_obj_get_user_data(tile);
-    _update_dots(page);
-    _highlight_card(page, _cur_card);
-}
-
-static void _launch_current() {
-    const TileDesc* descs = (_cur_page == 0) ? PAGE0 : PAGE1;
-    const TileDesc& d = descs[_cur_card];
+static void _launch_desc(const TileDesc& d, const char* source) {
     if (d.id != os::AppId::NONE) {
-        Serial.printf("[UI] launch app %d (btn)\n", (int)d.id);
+        Serial.printf("[UI] launch app %d (%s)\n", (int)d.id, source);
         os::app_launch(d.id);
     } else {
         Serial.println("[UI] Reglages (TODO)");
     }
 }
 
-static void _tile_tap_cb(lv_event_t* e) {
-    auto* desc = (const TileDesc*)lv_event_get_user_data(e);
-    if (!desc) return;
-    if (desc->id != os::AppId::NONE)
-        os::app_launch(desc->id);
-    else
-        Serial.println("[UI] Reglages (TODO)");
+static void _launch_current() {
+    _launch_desc(APPS[_linear_index()], "btn");
 }
 
-static void _build_page(lv_obj_t* tv_tile, const TileDesc descs[3], int page_idx) {
-    lv_obj_t* cont = lv_obj_create(tv_tile);
-    lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_pos(cont, 0, 0);
-    lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(cont, 0, 0);
-    lv_obj_set_style_pad_all(cont, 6, 0);
-    lv_obj_set_style_pad_gap(cont, 8, 0);
-    lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
+static void _card_press_cb(lv_event_t* e) {
+    int linear = (int)(intptr_t)lv_event_get_user_data(e);
+    if (linear < 0 || linear >= APP_COUNT) return;
+    _set_selection_from_linear(linear);
+    _launch_desc(APPS[linear], "press");
+}
 
-    static lv_coord_t col_dsc[] = {
-        LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
-        LV_GRID_TEMPLATE_LAST
-    };
-    static lv_coord_t row_dsc[] = {
-        LV_GRID_FR(1),
-        LV_GRID_TEMPLATE_LAST
-    };
-    lv_obj_set_grid_dsc_array(cont, col_dsc, row_dsc);
-    lv_obj_set_layout(cont, LV_LAYOUT_GRID);
+static lv_obj_t* _make_icon_well(lv_obj_t* parent, const char* icon) {
+    lv_obj_t* well = lv_obj_create(parent);
+    lv_obj_set_size(well, ICON_WELL_SZ, ICON_WELL_SZ);
+    lv_obj_set_style_radius(well, 26, 0);
+    lv_obj_set_style_border_width(well, 0, 0);
+    lv_obj_set_style_pad_all(well, 0, 0);
+    lv_obj_set_style_bg_opa(well, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(well, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_shadow_width(well, 0, 0);
 
-    for (int i = 0; i < 3; i++) {
-        lv_obj_t* card = lv_obj_create(cont);
-        lv_obj_set_size(card, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_grid_cell(card,
-            LV_GRID_ALIGN_STRETCH, i, 1,
-            LV_GRID_ALIGN_STRETCH, 0, 1);
-        lv_obj_set_style_bg_color(card, CARD_NORMAL, 0);
-        lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(card, 16, 0);
-        lv_obj_set_style_border_width(card, 1, 0);
-        lv_obj_set_style_border_color(card, lv_color_hex(0x2A2A40), 0);
-        lv_obj_set_style_pad_all(card, 0, 0);
+    lv_obj_t* icon_lbl = lv_label_create(well);
+    lv_label_set_text(icon_lbl, icon);
+    lv_obj_set_style_text_font(icon_lbl, &lv_font_montserrat_30, 0);
+    lv_obj_center(icon_lbl);
+    return well;
+}
+
+static void _build_page(lv_obj_t* parent, int page) {
+    lv_obj_t* page_obj = lv_obj_create(parent);
+    _pages[page] = page_obj;
+    lv_obj_set_size(page_obj, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(page_obj, 0, 0);
+    lv_obj_set_style_bg_opa(page_obj, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(page_obj, 0, 0);
+    lv_obj_set_style_pad_left(page_obj, 10, 0);
+    lv_obj_set_style_pad_right(page_obj, 10, 0);
+    lv_obj_set_style_pad_top(page_obj, 10, 0);
+    lv_obj_set_style_pad_bottom(page_obj, 6, 0);
+    lv_obj_set_style_pad_column(page_obj, 6, 0);
+    lv_obj_set_style_pad_row(page_obj, 6, 0);
+    lv_obj_clear_flag(page_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+    static lv_coord_t col_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
+    static lv_coord_t row_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
+    lv_obj_set_grid_dsc_array(page_obj, col_dsc, row_dsc);
+    lv_obj_set_layout(page_obj, LV_LAYOUT_GRID);
+
+    int start = _page_start_index(page);
+    int count = _page_item_count(page);
+    for (int i = 0; i < count; ++i) {
+        const TileDesc& desc = APPS[start + i];
+        int col = i % GRID_COLS;
+        int row = i / GRID_COLS;
+
+        lv_obj_t* slot = lv_obj_create(page_obj);
+        lv_obj_set_grid_cell(slot,
+                             LV_GRID_ALIGN_STRETCH, col, 1,
+                             LV_GRID_ALIGN_STRETCH, row, 1);
+        lv_obj_set_style_bg_opa(slot, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(slot, 0, 0);
+        lv_obj_set_style_pad_all(slot, 0, 0);
+        lv_obj_clear_flag(slot, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t* card = lv_obj_create(slot);
+        _cards[page][i] = card;
+        lv_obj_set_size(card, HOTSPOT_W, HOTSPOT_H);
+        lv_obj_center(card);
+        lv_obj_set_style_radius(card, 18, 0);
+        lv_obj_set_style_bg_opa(card, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(card, 0, 0);
+        lv_obj_set_style_pad_top(card, 6, 0);
+        lv_obj_set_style_pad_bottom(card, 6, 0);
+        lv_obj_set_style_pad_left(card, 4, 0);
+        lv_obj_set_style_pad_right(card, 4, 0);
         lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_style_bg_color(card, lv_color_hex(0x2E2E50), LV_STATE_PRESSED);
         lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_bg_color(card, lv_color_hex(0x293754), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(card, LV_OPA_10, LV_STATE_PRESSED);
 
-        _cards[page_idx][i] = card;
+        lv_obj_t* col_cont = lv_obj_create(card);
+        lv_obj_set_size(col_cont, LV_PCT(100), LV_PCT(100));
+        lv_obj_center(col_cont);
+        lv_obj_set_style_bg_opa(col_cont, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(col_cont, 0, 0);
+        lv_obj_set_style_pad_all(col_cont, 0, 0);
+        lv_obj_set_flex_flow(col_cont, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(col_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(col_cont, LV_OBJ_FLAG_SCROLLABLE);
 
-        lv_obj_t* icon = lv_label_create(card);
-        lv_label_set_text(icon, descs[i].icon);
-        lv_obj_set_style_text_font(icon, &lv_font_montserrat_24, 0);
-        lv_obj_set_style_text_color(icon, lv_color_white(), 0);
-        lv_obj_align(icon, LV_ALIGN_CENTER, 0, -12);
+        lv_obj_t* well = _make_icon_well(col_cont, desc.icon);
+        _icon_wells[page][i] = well;
 
-        lv_obj_t* lbl = lv_label_create(card);
-        lv_label_set_text(lbl, descs[i].label);
+        lv_obj_t* lbl = lv_label_create(col_cont);
+        _labels[page][i] = lbl;
+        lv_label_set_text(lbl, desc.label);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(0xCCCCDD), 0);
-        lv_obj_align(lbl, LV_ALIGN_BOTTOM_MID, 0, -10);
+        lv_obj_set_style_text_color(lbl, LABEL_IDLE, 0);
+        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(lbl, LV_PCT(100));
+        lv_obj_set_style_pad_top(lbl, 10, 0);
+        lv_obj_set_style_max_width(lbl, HOTSPOT_W - 8, 0);
 
-        lv_obj_add_event_cb(card, _tile_tap_cb, LV_EVENT_CLICKED,
-                            (void*)&descs[i]);
+        lv_obj_add_flag(well, LV_OBJ_FLAG_EVENT_BUBBLE);
+        lv_obj_add_flag(lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
+        lv_obj_add_event_cb(card, _card_press_cb, LV_EVENT_PRESSED, (void*)(intptr_t)(start + i));
     }
 }
 
-static uint32_t _key3_down_ms  = 0;
-static uint32_t _boot_down_ms  = 0;
-static bool     _key3_was_low  = false;
-static bool     _boot_was_low  = false;
+static void _build_footer(lv_obj_t* parent) {
+    int32_t dot_spacing = 10;
+    int32_t total_w = PAGE_COUNT * 8 + (PAGE_COUNT - 1) * dot_spacing;
+    int32_t x = (LV_HOR_RES - total_w) / 2;
+    int32_t y = LV_VER_RES - FOOTER_H + 8;
+
+    for (int i = 0; i < PAGE_COUNT; ++i) {
+        _dots[i] = lv_obj_create(parent);
+        lv_obj_set_size(_dots[i], 8, 8);
+        lv_obj_set_pos(_dots[i], x + i * (8 + dot_spacing), y);
+        lv_obj_set_style_radius(_dots[i], LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_opa(_dots[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(_dots[i], 0, 0);
+        lv_obj_clear_flag(_dots[i], LV_OBJ_FLAG_SCROLLABLE);
+    }
+}
+
+static uint32_t _key3_down_ms = 0;
+static uint32_t _boot_down_ms = 0;
+static bool _key3_was_low = false;
+static bool _boot_was_low = false;
 
 void ui_launcher_btn_tick() {
-    // NOTE : pas de guard "lv_scr_act() == _screen" ici.
-    // BOOT long doit fonctionner même quand une app est active (écran != launcher).
-    // La condition launcher_active protège KEY3 et BOOT court (navigation carousel)
-    // pour éviter des changements de page fantômes quand le launcher est masqué.
-
     if (!_screen) return;
     bool launcher_active = (lv_scr_act() == _screen);
-
     uint32_t now = millis();
 
-    // —— KEY3 (GPIO18) ——
     bool key3_low = (digitalRead(PIN_KEY3) == LOW);
     if (key3_low && !_key3_was_low) {
         _key3_down_ms = now;
     } else if (!key3_low && _key3_was_low) {
         if (launcher_active) {
             uint32_t held = now - _key3_down_ms;
-            if (held >= LONG_PRESS_MS) {
-                // Long : lancer l'app sélectionnée
-                _launch_current();
-            } else {
-                // Court : app suivante
-                _move_selection(+1);
-            }
+            if (held >= LONG_PRESS_MS) _launch_current();
+            else _move_selection(+1);
         }
     }
     _key3_was_low = key3_low;
 
-    // —— BOOT (GPIO0) ——
     bool boot_low = (digitalRead(PIN_BOOT_BTN) == LOW);
     if (boot_low && !_boot_was_low) {
         _boot_down_ms = now;
     } else if (!boot_low && _boot_was_low) {
         uint32_t held = now - _boot_down_ms;
         if (held >= LONG_PRESS_MS) {
-            // Long : fermer l'app courante (global — fonctionne hors launcher)
             if (os::app_current() != os::AppId::NONE) {
                 Serial.println("[UI] BOOT long -> app_close_current");
                 os::app_close_current();
@@ -248,7 +390,6 @@ void ui_launcher_btn_tick() {
                 Serial.println("[UI] BOOT long -> rien (launcher actif)");
             }
         } else if (launcher_active) {
-            // Court : app précédente
             _move_selection(-1);
         }
     }
@@ -256,65 +397,44 @@ void ui_launcher_btn_tick() {
 }
 
 void ui_launcher_init() {
-    pinMode(PIN_KEY3,     INPUT_PULLUP);
+    pinMode(PIN_KEY3, INPUT_PULLUP);
     pinMode(PIN_BOOT_BTN, INPUT_PULLUP);
 
     _screen = lv_obj_create(nullptr);
-    lv_obj_set_style_bg_color(_screen, lv_color_hex(0x0D0D1A), 0);
+    lv_obj_set_style_bg_color(_screen, BG_TOP, 0);
+    lv_obj_set_style_bg_grad_color(_screen, BG_BOTTOM, 0);
+    lv_obj_set_style_bg_grad_dir(_screen, LV_GRAD_DIR_VER, 0);
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(_screen, 0, 0);
     lv_obj_clear_flag(_screen, LV_OBJ_FLAG_SCROLLABLE);
+    _build_background(cfg_get_u8(NVS_KEY_LAUNCHER_BG, 0));
 
-    int32_t tv_y = STATUS_BAR_H + 4;
-    int32_t tv_h = LV_VER_RES - tv_y - DOT_AREA_H - 4;
-    int32_t tv_w = LV_HOR_RES;
+    lv_obj_t* content = lv_obj_create(_screen);
+    lv_obj_set_pos(content, 0, STATUS_BAR_H + 2);
+    lv_obj_set_size(content, LV_HOR_RES, LV_VER_RES - STATUS_BAR_H - FOOTER_H - 2);
+    lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(content, 0, 0);
+    lv_obj_set_style_pad_all(content, 0, 0);
+    lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
 
-    _tileview = lv_tileview_create(_screen);
-    lv_obj_set_pos(_tileview, 0, tv_y);
-    lv_obj_set_size(_tileview, tv_w, tv_h);
-    lv_obj_set_style_bg_opa(_tileview, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(_tileview, 0, 0);
-    lv_obj_set_style_pad_all(_tileview, 0, 0);
-    lv_obj_set_scroll_dir(_tileview, LV_DIR_HOR);
-    lv_obj_set_scrollbar_mode(_tileview, LV_SCROLLBAR_MODE_OFF);
-
-    lv_obj_t* page0 = lv_tileview_add_tile(_tileview, 0, 0, LV_DIR_HOR);
-    lv_obj_set_user_data(page0, (void*)(intptr_t)0);
-    _build_page(page0, PAGE0, 0);
-
-    lv_obj_t* page1 = lv_tileview_add_tile(_tileview, 1, 0, LV_DIR_HOR);
-    lv_obj_set_user_data(page1, (void*)(intptr_t)1);
-    _build_page(page1, PAGE1, 1);
-
-    lv_obj_add_event_cb(_tileview, _tileview_changed_cb,
-                        LV_EVENT_VALUE_CHANGED, nullptr);
-
-    int32_t dot_y       = LV_VER_RES - DOT_AREA_H + (DOT_AREA_H - 8) / 2;
-    int32_t dot_spacing = 14;
-    int32_t dots_total  = _num_pages * 8 + (_num_pages - 1) * dot_spacing;
-    int32_t dot_x_start = (LV_HOR_RES - dots_total) / 2;
-
-    for (int i = 0; i < _num_pages; i++) {
-        _dot[i] = lv_obj_create(_screen);
-        lv_obj_set_size(_dot[i], 8, 8);
-        lv_obj_set_pos(_dot[i], dot_x_start + i * (8 + dot_spacing), dot_y);
-        lv_obj_set_style_radius(_dot[i], LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_opa(_dot[i], LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(_dot[i], 0, 0);
-        lv_obj_clear_flag(_dot[i], LV_OBJ_FLAG_SCROLLABLE);
+    for (int page = 0; page < PAGE_COUNT; ++page) {
+        _build_page(content, page);
     }
-    _highlight_card(0, 0);
-    _update_dots(0);
+
+    _build_footer(_screen);
+    _set_selection_from_linear(0);
 
     lv_scr_load(_screen);
     ui_status_bar_raise();
     hal::display_force_refresh();
-    Serial.println("[UI] launcher carousel OK");
+    Serial.println("[UI] launcher grid OK");
 }
 
 void ui_launcher_show() {
     if (_screen) {
+        _build_background(cfg_get_u8(NVS_KEY_LAUNCHER_BG, 0));
         lv_scr_load(_screen);
         ui_status_bar_raise();
-        lv_obj_invalidate(lv_scr_act());
+        _sync_selection();
     }
 }
