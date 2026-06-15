@@ -71,6 +71,14 @@ static void _highlight_card(int page, int card) {
     _cur_card = card;
 }
 
+static void _sync_selection() {
+    _update_dots(_cur_page);
+    _highlight_card(_cur_page, _cur_card);
+    lv_obj_invalidate(_screen);
+    hal::display_force_refresh();
+    Serial.printf("[UI] launcher sel page=%d card=%d\n", _cur_page, _cur_card);
+}
+
 static void _go_to_page(int page) {
     if (!_tileview) return;
     if (page < 0) page = 0;
@@ -83,11 +91,28 @@ static void _go_to_page(int page) {
             break;
         }
     }
-    _update_dots(page);
-    _highlight_card(page, _cur_card);
-    lv_obj_invalidate(_screen);
-    hal::display_force_refresh();
-    Serial.printf("[UI] launcher page -> %d\n", page);
+    _cur_page = page;
+    _sync_selection();
+}
+
+static void _move_selection(int delta) {
+    int linear = _cur_page * 3 + _cur_card + delta;
+    const int total = _num_pages * 3;
+    if (linear < 0) linear = total - 1;
+    if (linear >= total) linear = 0;
+
+    int next_page = linear / 3;
+    int next_card = linear % 3;
+    bool page_changed = (next_page != _cur_page);
+
+    _cur_page = next_page;
+    _cur_card = next_card;
+
+    if (page_changed) {
+        _go_to_page(_cur_page);
+    } else {
+        _sync_selection();
+    }
 }
 
 static void _tileview_changed_cb(lv_event_t* e) {
@@ -201,9 +226,8 @@ void ui_launcher_btn_tick() {
                 // Long : lancer l'app sélectionnée
                 _launch_current();
             } else {
-                // Court : page suivante (droite)
-                int next = (_cur_page + 1) % _num_pages;
-                _go_to_page(next);
+                // Court : app suivante
+                _move_selection(+1);
             }
         }
     }
@@ -224,9 +248,8 @@ void ui_launcher_btn_tick() {
                 Serial.println("[UI] BOOT long -> rien (launcher actif)");
             }
         } else if (launcher_active) {
-            // Court : page précédente (gauche), sens opposé à KEY3
-            int prev = (_cur_page - 1 + _num_pages) % _num_pages;
-            _go_to_page(prev);
+            // Court : app précédente
+            _move_selection(-1);
         }
     }
     _boot_was_low = boot_low;
