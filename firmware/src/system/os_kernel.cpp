@@ -8,6 +8,7 @@
 // réussi, pour éviter un flag "déjà init" si init() échoue.
 // ============================================================
 #include "os_kernel.h"
+#include "../hal/display.h"
 #include "../hal/rtc.h"
 #include "../hal/pmu.h"
 #include "../../include/pins.h"
@@ -103,6 +104,7 @@ bool app_launch(AppId id) {
             *flag = true;   // marqué seulement après init() réussi
         }
         inst->onResume();
+        hal::display_force_refresh();
     });
 
     Serial.printf("[KERNEL] app_launch %d → dispatched (init=%s)\n",
@@ -117,6 +119,7 @@ void app_close_current() {
     ui::dispatch_post([inst]() {
         if (inst) inst->onPause();
         ui_launcher_show();
+        hal::display_force_refresh();
     });
 }
 
