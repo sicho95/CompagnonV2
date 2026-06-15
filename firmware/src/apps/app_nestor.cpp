@@ -1,4 +1,5 @@
 #include "app_nestor.h"
+#include "../hal/display.h"
 #include "../ui/status_bar.h"
 #include <Arduino.h>
 #include <lvgl.h>
@@ -42,6 +43,7 @@ void AppNestor::onResume() {
     lv_scr_load(_screen);
     ui_status_bar_raise();
     lv_obj_invalidate(lv_scr_act());
+    hal::display_force_refresh();
     Serial.printf("[Nestor] resume scr=%p active=%p\n", _screen, lv_scr_act());
 }
 
