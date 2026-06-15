@@ -64,14 +64,28 @@ static void task_ui_lvgl(void*) {
     ui_launcher_init();
     Serial.println("[UI] LVGL task ready");
     uint32_t last_status_tick = 0;
+    uint32_t last_touch_probe = 0;
     for (;;) {
         ui::dispatch_flush();   // exécute les lv_scr_load postés par os_kernel
         lv_timer_handler();
+        lv_indev_read(touch_indev);
         ui::notification_tick();
         uint32_t now = millis();
         if (now - last_status_tick >= 1000) {
             last_status_tick = now;
             ui_status_bar_tick();
+        }
+        if (now - last_touch_probe >= 20) {
+            last_touch_probe = now;
+            uint16_t x = 0;
+            uint16_t y = 0;
+            if (hal::touch_read(x, y)) {
+                static uint32_t last_probe_log = 0;
+                if (now - last_probe_log > 200) {
+                    Serial.printf("[TOUCH] probe x=%u y=%u\n", x, y);
+                    last_probe_log = now;
+                }
+            }
         }
         ui_launcher_btn_tick();
         vTaskDelay(pdMS_TO_TICKS(5));
