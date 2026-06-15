@@ -36,9 +36,9 @@ static int32_t _clamp_i32(int32_t v, int32_t lo, int32_t hi) {
 
 static void _map_touch_to_lvgl(int32_t raw_x, int32_t raw_y,
                                uint16_t& x, uint16_t& y) {
-    // Match Waveshare example: setSwapXY(true), setMirrorXY(true, false).
-    int32_t tx = 480 - raw_y;
-    int32_t ty = raw_x;
+    // Match official Waveshare BSP: swap_xy=1, mirror_x=0, mirror_y=1.
+    int32_t tx = raw_y;
+    int32_t ty = 480 - raw_x;
     int32_t lx = tx - LCD_MARGIN_H;
     int32_t ly = ty - LCD_MARGIN_V;
     x = (uint16_t)_clamp_i32(lx, 0, LCD_WIDTH  - 1);
