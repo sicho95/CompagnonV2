@@ -1,9 +1,8 @@
 // ============================================================
 // CompagnonV2 — hal/touch.cpp
 // CST9220 via SensorLib 0.4.1 — namespace hal
-// IMPORTANT : PIN_TP_INT doit être configuré en INPUT avant
-// l'init du driver, sinon isPressed() lit une valeur flottante
-// et retourne toujours false.
+// IMPORTANT : setPins() configure RST/INT pour SensorLib ; begin()
+// garde SDA/SCL à -1 car Wire est déjà initialisé ailleurs.
 // ============================================================
 #include "touch.h"
 #include "../../include/pins.h"
@@ -30,18 +29,10 @@ static void _map_touch_to_lvgl(int32_t raw_x, int32_t raw_y,
 }
 
 bool hal::touch_init() {
-    // Configurer les GPIO touch avant l'init du driver
-    pinMode(PIN_TP_INT, INPUT);   // CST9220 active-low interrupt
-    pinMode(PIN_TP_RST, OUTPUT);
-    digitalWrite(PIN_TP_RST, HIGH);
-    delay(10);
-    digitalWrite(PIN_TP_RST, LOW);
-    delay(20);
-    digitalWrite(PIN_TP_RST, HIGH);
-    delay(100);  // attente stabilisation CST9220 post-reset
+    _drv.setPins(PIN_TP_RST, PIN_TP_INT);
 
-    // Wire déjà init par PMU — ne pas rappeler Wire.begin()
-    if (_drv.begin(Wire, CST92XX_SLAVE_ADDRESS, PIN_TP_RST, PIN_TP_INT)) {
+    // Wire déjà init par PMU — ne pas rappeler Wire.setPins()/begin().
+    if (_drv.begin(Wire, CST92XX_SLAVE_ADDRESS, -1, -1)) {
         _drv.setSwapXY(false);
         _drv.setMirrorXY(false, false);
         _ok = true;
@@ -57,17 +48,21 @@ bool hal::touch_init() {
 
 bool hal::touch_read(uint16_t& x, uint16_t& y) {
     if (!_ok) return false;
-    if (_drv.isPressed()) {
-        int16_t tx[1] = {0};
-        int16_t ty[1] = {0};
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-        uint8_t n = _drv.getPoint(tx, ty, 1);
-#pragma GCC diagnostic pop
-        if (n > 0) {
-            _map_touch_to_lvgl(tx[0], ty[0], x, y);
-            return true;
+
+    const TouchPoints& points = _drv.getTouchPoints();
+    if (points.hasPoints()) {
+        const TouchPoint& point = points.getPoint(0);
+        _map_touch_to_lvgl(point.x, point.y, x, y);
+
+        static uint32_t last_raw_log = 0;
+        uint32_t now = millis();
+        if (now - last_raw_log > 200) {
+            Serial.printf("[TOUCH] raw=%u,%u event=%u -> lv=%u,%u int=%d\n",
+                          point.x, point.y, point.event, x, y,
+                          digitalRead(PIN_TP_INT));
+            last_raw_log = now;
         }
+        return true;
     }
     return false;
 }
