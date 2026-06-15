@@ -1,4 +1,5 @@
 #include "app_rappels.h"
+#include "../hal/display.h"
 #include "../ui/status_bar.h"
 #include <Arduino.h>
 #include <lvgl.h>
@@ -96,6 +97,7 @@ void AppRappels::onResume() {
     lv_scr_load(_screen);
     ui_status_bar_raise();
     lv_obj_invalidate(lv_scr_act());
+    hal::display_force_refresh();
     Serial.println("[Rappels] resume");
 }
 
