@@ -1,5 +1,6 @@
 #include "app_nestor.h"
 #include "../hal/display.h"
+#include "../ui/app_header.h"
 #include "../ui/status_bar.h"
 #include <Arduino.h>
 #include <lvgl.h>
@@ -12,12 +13,13 @@ void AppNestor::init() {
     lv_obj_set_style_bg_color(_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(_screen, LV_OBJ_FLAG_SCROLLABLE);
+    ui_app_header_attach(_screen);
 
     lv_obj_t* title = lv_label_create(_screen);
     lv_label_set_text(title, LV_SYMBOL_AUDIO "  Nestor");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0x4FC3F7), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 16, 44);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 16, ui_app_header_bar_y() + 8);
 
     lv_obj_t* body = lv_label_create(_screen);
     lv_label_set_text(body, "Assistant vocal pret.");
