@@ -34,11 +34,13 @@ static TaskHandle_t _h_net   = nullptr;
 
 // —— Touch read callback ——
 static void _touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
+    (void)indev;
     uint16_t x = 0, y = 0;
     if (hal::touch_read(x, y)) {
         data->point.x = (int32_t)x;
         data->point.y = (int32_t)y;
         data->state   = LV_INDEV_STATE_PRESSED;
+        ui_launcher_touch(true, x, y);
         static uint32_t _last_log = 0;
         if (millis() - _last_log > 200) {
             Serial.printf("[TOUCH] x=%d y=%d\n", x, y);
@@ -46,6 +48,7 @@ static void _touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
         }
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
+        ui_launcher_touch(false, 0, 0);
     }
 }
 
@@ -65,7 +68,6 @@ static void task_ui_lvgl(void*) {
     ui_launcher_init();
     Serial.println("[UI] LVGL task ready");
     uint32_t last_status_tick = 0;
-    uint32_t last_touch_probe = 0;
     for (;;) {
         ui::dispatch_flush();   // exécute les lv_scr_load postés par os_kernel
         lv_timer_handler();
@@ -75,18 +77,6 @@ static void task_ui_lvgl(void*) {
         if (now - last_status_tick >= 1000) {
             last_status_tick = now;
             ui_status_bar_tick();
-        }
-        if (now - last_touch_probe >= 20) {
-            last_touch_probe = now;
-            uint16_t x = 0;
-            uint16_t y = 0;
-            if (hal::touch_read(x, y)) {
-                static uint32_t last_probe_log = 0;
-                if (now - last_probe_log > 200) {
-                    Serial.printf("[TOUCH] probe x=%u y=%u\n", x, y);
-                    last_probe_log = now;
-                }
-            }
         }
         ui_launcher_btn_tick();
         vTaskDelay(pdMS_TO_TICKS(5));
