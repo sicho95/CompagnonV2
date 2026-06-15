@@ -79,12 +79,15 @@ static void _go_to_page(int page) {
     for (uint32_t i = 0; i < n; i++) {
         lv_obj_t* child = lv_obj_get_child(_tileview, (int32_t)i);
         if ((int)(intptr_t)lv_obj_get_user_data(child) == page) {
-            lv_tileview_set_tile(_tileview, child, LV_ANIM_ON);
+            lv_tileview_set_tile(_tileview, child, LV_ANIM_OFF);
             break;
         }
     }
     _update_dots(page);
     _highlight_card(page, _cur_card);
+    lv_obj_invalidate(_screen);
+    hal::display_force_refresh();
+    Serial.printf("[UI] launcher page -> %d\n", page);
 }
 
 static void _tileview_changed_cb(lv_event_t* e) {
