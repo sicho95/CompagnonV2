@@ -28,6 +28,7 @@
 #define NVS_KEY_WAKE_WORD   "wake_word"
 #define NVS_KEY_SILENT      "silent_mode"
 #define NVS_KEY_VOLUME      "volume"
+#define NVS_KEY_LAUNCHER_BG "launcher_bg"
 
 void    nvs_config_init(void);
 
