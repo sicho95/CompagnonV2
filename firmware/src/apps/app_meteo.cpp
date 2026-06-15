@@ -8,6 +8,7 @@
 // ============================================================
 #include "app_meteo.h"
 #include "../config/nvs_config.h"
+#include "../ui/app_header.h"
 #include "../ui/status_bar.h"
 #include <lvgl.h>
 #include <Arduino.h>
@@ -50,10 +51,11 @@ void AppMeteo::init() {
     _screen = lv_obj_create(nullptr);
     lv_obj_set_style_bg_color(_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
+    ui_app_header_attach(_screen);
 
     lv_obj_t* hdr = lv_obj_create(_screen);
     lv_obj_set_size(hdr, 480, 44);
-    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 36);
+    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, ui_app_header_bar_y());
     lv_obj_set_style_bg_color(hdr, lv_color_black(), 0);
     lv_obj_set_style_border_width(hdr, 1, 0);
     lv_obj_set_style_border_side(hdr, LV_BORDER_SIDE_BOTTOM, 0);
@@ -76,7 +78,7 @@ void AppMeteo::init() {
 
     lv_obj_t* main_card = lv_obj_create(_screen);
     lv_obj_set_size(main_card, 460, 130);
-    lv_obj_align(main_card, LV_ALIGN_TOP_MID, 0, 88);
+    lv_obj_align(main_card, LV_ALIGN_TOP_MID, 0, ui_app_content_top());
     lv_obj_set_style_bg_color(main_card, lv_color_hex(0x050D1A), 0);
     lv_obj_set_style_bg_opa(main_card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(main_card, 14, 0);
@@ -99,7 +101,7 @@ void AppMeteo::init() {
 
     lv_obj_t* fc_cont = lv_obj_create(_screen);
     lv_obj_set_size(fc_cont, 460, 80);
-    lv_obj_align(fc_cont, LV_ALIGN_TOP_MID, 0, 228);
+    lv_obj_align(fc_cont, LV_ALIGN_TOP_MID, 0, ui_app_content_top() + 140);
     lv_obj_set_style_bg_color(fc_cont, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(fc_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(fc_cont, 0, 0);
