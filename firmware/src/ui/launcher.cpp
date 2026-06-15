@@ -24,8 +24,8 @@
 #define GRID_ROWS      2
 #define LONG_PRESS_MS  600
 #define HOTSPOT_W      126
-#define HOTSPOT_H      164
-#define ICON_WELL_SZ   100
+#define HOTSPOT_H      170
+#define ICON_WELL_SZ   104
 
 struct TileDesc {
     os::AppId   id;
@@ -34,10 +34,10 @@ struct TileDesc {
 };
 
 static constexpr TileDesc APPS[] = {
-    { os::AppId::NESTOR,  LV_SYMBOL_AUDIO,    "Nestor"   },
-    { os::AppId::METEO,   LV_SYMBOL_HOME,     "Meteo"    },
-    { os::AppId::BOURSE,  LV_SYMBOL_CHARGE,   "Bourse"   },
-    { os::AppId::RADARS,  LV_SYMBOL_EYE_OPEN, "Radars"   },
+    { os::AppId::NESTOR,  "AI",               "Nestor"   },
+    { os::AppId::METEO,   LV_SYMBOL_TINT,     "Meteo"    },
+    { os::AppId::BOURSE,  LV_SYMBOL_BARS,     "Bourse"   },
+    { os::AppId::RADARS,  LV_SYMBOL_WIFI,     "Radars"   },
     { os::AppId::RAPPELS, LV_SYMBOL_BELL,     "Rappels"  },
     { os::AppId::NONE,    LV_SYMBOL_SETTINGS, "Reglages" },
 };
@@ -47,6 +47,7 @@ static constexpr int PAGE_COUNT = (APP_COUNT + PAGE_SIZE - 1) / PAGE_SIZE;
 
 static lv_obj_t* _screen = nullptr;
 static lv_obj_t* _pages[PAGE_COUNT] = {};
+static lv_obj_t* _slots[PAGE_COUNT][PAGE_SIZE] = {};
 static lv_obj_t* _cards[PAGE_COUNT][PAGE_SIZE] = {};
 static lv_obj_t* _icon_wells[PAGE_COUNT][PAGE_SIZE] = {};
 static lv_obj_t* _labels[PAGE_COUNT][PAGE_SIZE] = {};
@@ -56,11 +57,13 @@ static uint8_t   _bg_obj_count = 0;
 
 static int _cur_page = 0;
 static int _cur_slot = 0;
+static bool _touch_down = false;
+static int  _touch_linear = -1;
 
 static const lv_color_t BG_TOP       = LV_COLOR_MAKE(0x00, 0x00, 0x00);
 static const lv_color_t BG_BOTTOM    = LV_COLOR_MAKE(0x00, 0x00, 0x00);
 static const lv_color_t CARD_ACTIVE  = LV_COLOR_MAKE(0x22, 0x2D, 0x4A);
-static const lv_color_t WELL_IDLE    = LV_COLOR_MAKE(0xF2, 0xF5, 0xFA);
+static const lv_color_t WELL_IDLE    = LV_COLOR_MAKE(0x98, 0xA3, 0xB5);
 static const lv_color_t WELL_ACTIVE  = LV_COLOR_MAKE(0x66, 0xC7, 0xFF);
 static const lv_color_t LABEL_IDLE   = LV_COLOR_MAKE(0xDC, 0xE5, 0xF2);
 static const lv_color_t LABEL_ACTIVE = LV_COLOR_MAKE(0xFF, 0xFF, 0xFF);
@@ -232,11 +235,25 @@ static void _launch_current() {
     _launch_desc(APPS[_linear_index()], "btn");
 }
 
-static void _card_press_cb(lv_event_t* e) {
-    int linear = (int)(intptr_t)lv_event_get_user_data(e);
-    if (linear < 0 || linear >= APP_COUNT) return;
-    _set_selection_from_linear(linear);
-    _launch_desc(APPS[linear], "press");
+static int _launcher_linear_from_point(uint16_t x, uint16_t y) {
+    if (!_screen || lv_scr_act() != _screen) return -1;
+
+    for (int i = 0; i < _page_item_count(_cur_page); ++i) {
+        lv_obj_t* slot = _slots[_cur_page][i];
+        if (!slot) continue;
+
+        lv_area_t a;
+        lv_obj_get_coords(slot, &a);
+        a.x1 -= 10;
+        a.y1 -= 10;
+        a.x2 += 10;
+        a.y2 += 10;
+        if ((int32_t)x >= a.x1 && (int32_t)x <= a.x2 &&
+            (int32_t)y >= a.y1 && (int32_t)y <= a.y2) {
+            return _page_start_index(_cur_page) + i;
+        }
+    }
+    return -1;
 }
 
 static lv_obj_t* _make_icon_well(lv_obj_t* parent, const char* icon) {
@@ -284,6 +301,7 @@ static void _build_page(lv_obj_t* parent, int page) {
         int row = i / GRID_COLS;
 
         lv_obj_t* slot = lv_obj_create(page_obj);
+        _slots[page][i] = slot;
         lv_obj_set_grid_cell(slot,
                              LV_GRID_ALIGN_STRETCH, col, 1,
                              LV_GRID_ALIGN_STRETCH, row, 1);
@@ -304,9 +322,6 @@ static void _build_page(lv_obj_t* parent, int page) {
         lv_obj_set_style_pad_left(card, 4, 0);
         lv_obj_set_style_pad_right(card, 4, 0);
         lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_style_bg_color(card, lv_color_hex(0x293754), LV_STATE_PRESSED);
-        lv_obj_set_style_bg_opa(card, LV_OPA_10, LV_STATE_PRESSED);
 
         lv_obj_t* col_cont = lv_obj_create(card);
         lv_obj_set_size(col_cont, LV_PCT(100), LV_PCT(100));
@@ -334,7 +349,6 @@ static void _build_page(lv_obj_t* parent, int page) {
 
         lv_obj_add_flag(well, LV_OBJ_FLAG_EVENT_BUBBLE);
         lv_obj_add_flag(lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
-        lv_obj_add_event_cb(card, _card_press_cb, LV_EVENT_PRESSED, (void*)(intptr_t)(start + i));
     }
 }
 
@@ -394,6 +408,33 @@ void ui_launcher_btn_tick() {
         }
     }
     _boot_was_low = boot_low;
+}
+
+void ui_launcher_touch(bool pressed, uint16_t x, uint16_t y) {
+    if (!_screen) return;
+    bool launcher_active = (lv_scr_act() == _screen);
+
+    if (!launcher_active) {
+        _touch_down = false;
+        _touch_linear = -1;
+        return;
+    }
+
+    if (pressed) {
+        int linear = _launcher_linear_from_point(x, y);
+        if (!_touch_down && linear >= 0) {
+            _touch_linear = linear;
+            _set_selection_from_linear(linear);
+            _touch_down = true;
+        }
+        return;
+    }
+
+    if (_touch_down && _touch_linear >= 0) {
+        _launch_desc(APPS[_touch_linear], "touch");
+    }
+    _touch_down = false;
+    _touch_linear = -1;
 }
 
 void ui_launcher_init() {
