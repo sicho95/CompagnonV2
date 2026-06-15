@@ -1,5 +1,6 @@
 #include "app_radars.h"
 #include "../net/wifi_mgr.h"
+#include "../ui/app_header.h"
 #include "../ui/status_bar.h"
 #include <lvgl.h>
 #include <Arduino.h>
@@ -20,10 +21,11 @@ void AppRadars::init() {
     _screen = lv_obj_create(nullptr);
     lv_obj_set_style_bg_color(_screen, lv_color_black(), 0);  // AMOLED
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
+    ui_app_header_attach(_screen);
 
     lv_obj_t* hdr = lv_obj_create(_screen);
     lv_obj_set_size(hdr, 480, 44);
-    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 36);
+    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, ui_app_header_bar_y());
     lv_obj_set_style_bg_color(hdr, lv_color_black(), 0);
     lv_obj_set_style_border_width(hdr, 1, 0);
     lv_obj_set_style_border_side(hdr, LV_BORDER_SIDE_BOTTOM, 0);
@@ -44,8 +46,8 @@ void AppRadars::init() {
     lv_obj_align(_lbl_wifi, LV_ALIGN_RIGHT_MID, -8, 0);
 
     lv_obj_t* list = lv_obj_create(_screen);
-    lv_obj_set_size(list, 480, LV_VER_RES - 36 - 44 - 8);
-    lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_size(list, 480, ui_app_content_height());
+    lv_obj_set_pos(list, 0, ui_app_content_top());
     lv_obj_set_style_bg_color(list, lv_color_black(), 0);  // AMOLED
     lv_obj_set_style_bg_opa(list, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(list, 0, 0);
