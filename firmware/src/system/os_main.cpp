@@ -40,7 +40,6 @@ static void _touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
         data->point.x = (int32_t)x;
         data->point.y = (int32_t)y;
         data->state   = LV_INDEV_STATE_PRESSED;
-        ui_launcher_touch(true, x, y);
         static uint32_t _last_log = 0;
         if (millis() - _last_log > 200) {
             Serial.printf("[TOUCH] x=%d y=%d\n", x, y);
@@ -48,7 +47,6 @@ static void _touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
         }
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
-        ui_launcher_touch(false, 0, 0);
     }
 }
 
@@ -72,6 +70,8 @@ static void task_ui_lvgl(void*) {
         ui::dispatch_flush();   // exécute les lv_scr_load postés par os_kernel
         lv_timer_handler();
         lv_indev_read(touch_indev);
+        ui_status_bar_touch_tick();
+        ui_launcher_touch_tick();
         ui::notification_tick();
         uint32_t now = millis();
         if (now - last_status_tick >= 1000) {
