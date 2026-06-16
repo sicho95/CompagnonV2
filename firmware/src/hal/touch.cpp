@@ -31,8 +31,16 @@ static int32_t _clamp_i32(int32_t v, int32_t lo, int32_t hi) {
 
 static void _map_touch_to_lvgl(int32_t sensor_x, int32_t sensor_y,
                                uint16_t& x, uint16_t& y) {
-    int32_t lx = sensor_x - LCD_MARGIN_H;
-    int32_t ly = sensor_y - LCD_MARGIN_V;
+    // Reprend la logique du BSP Waveshare:
+    // flags = { mirror_y = 1, swap_xy = 1 } pour la dalle en rotation courante.
+    int32_t tx = sensor_x;
+    int32_t ty = (LCD_HEIGHT_PHYS - 1) - sensor_y;
+
+    const int32_t swapped_x = ty;
+    const int32_t swapped_y = tx;
+
+    int32_t lx = swapped_x - LCD_MARGIN_H;
+    int32_t ly = swapped_y - LCD_MARGIN_V;
     x = (uint16_t)_clamp_i32(lx, 0, LCD_WIDTH  - 1);
     y = (uint16_t)_clamp_i32(ly, 0, LCD_HEIGHT - 1);
 }
@@ -59,8 +67,8 @@ bool hal::touch_init() {
         pinMode(PIN_TP_INT, INPUT_PULLUP);
         _drv.setMaxCoordinates(480, 480);
         attachInterrupt(digitalPinToInterrupt(PIN_TP_INT), _touch_irq_isr, FALLING);
-        _drv.setSwapXY(true);
-        _drv.setMirrorXY(true, false);
+        _drv.setSwapXY(false);
+        _drv.setMirrorXY(false, false);
         _ok = true;
         Serial.printf("[TOUCH] CST9220 OK — %s (RST=%d INT=%d irq=%d)\n",
                       _drv.getModelName(), PIN_TP_RST, PIN_TP_INT,
