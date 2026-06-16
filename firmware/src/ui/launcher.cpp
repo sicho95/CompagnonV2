@@ -60,6 +60,7 @@ static uint8_t   _bg_obj_count = 0;
 
 struct TileEventCtx {
     int  linear = -1;
+    // press_lost conservé pour debug éventuel mais ne bloque plus le click
     bool press_lost = false;
 };
 static TileEventCtx _tile_ctx[PAGE_COUNT][PAGE_SIZE] = {};
@@ -383,7 +384,12 @@ static void _tile_event_cb(lv_event_t* e) {
         case LV_EVENT_RELEASED:
             break;
         case LV_EVENT_CLICKED:
-            if (!_gesture_click_suppressed && !ctx->press_lost) {
+            // Fix: on retire la condition ctx->press_lost.
+            // LV_EVENT_CLICKED est garanti par LVGL uniquement si le doigt
+            // se relache sur l'objet — pas besoin de double-filtrer.
+            // press_lost bloquait le launch quand un getPoint() invalide
+            // survenait pendant le press (IRQ retombee trop tôt).
+            if (!_gesture_click_suppressed) {
                 _set_selection_from_linear(ctx->linear);
                 _launch_desc(APPS[ctx->linear], "touch");
             }
@@ -452,6 +458,9 @@ void ui_launcher_btn_tick() {
 }
 
 void ui_launcher_touch_tick() {
+    // IMPORTANT : cette fonction doit être appelée APRES lv_timer_handler()
+    // dans la task LVGL. Si elle est appelée avant, le frame touch est
+    // consommé/reseté avant que LVGL puisse dispatcher LV_EVENT_CLICKED.
     if (!_screen) return;
     const bool launcher_active = (lv_scr_act() == _screen);
     const hal::TouchFrame& frame = hal::touch_frame();

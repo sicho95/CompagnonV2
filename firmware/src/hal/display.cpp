@@ -6,11 +6,12 @@
 // repere que le touch. Les marges boitier restent disponibles
 // uniquement comme safe area pour le layout.
 //
-// ROTATION : LV_DISPLAY_ROTATION_270 correspond à l'orientation
-// physique correcte de la carte Waveshare ESP32-S3-Touch-AMOLED-2.16.
-// LVGL transforme automatiquement le rendu ET les coordonnées touch.
+// ROTATION : LV_DISPLAY_ROTATION_270 (-90°) corrige le rendu
+// physique de la carte Waveshare ESP32-S3-Touch-AMOLED-2.16.
+// LVGL transforme uniquement le rendu — les coords touch restent
+// en rotation=0 (pass-through brut CST9220 deja aligne).
 // Pour la rotation auto (QMI8658), appeler lv_display_set_rotation()
-// via display_get() — c'est le seul point de changement nécessaire.
+// via display_get() — c'est le seul point de changement necessaire.
 // ============================================================
 #include "display.h"
 #include "drivers/co5300.h"
@@ -66,13 +67,15 @@ void display_init() {
     lv_display_set_buffers(_disp, _buf1, _buf2, BUF_BYTES,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
-    // Rotation 270° : orientation physique correcte de la carte Waveshare.
-    // LVGL tourne le rendu ET remappe les coords touch automatiquement.
+    // ROTATION_270 (-90 deg) : corrige le rendu physique de la carte Waveshare.
+    // LVGL tourne uniquement le rendu — les coords touch (rotation=0 pass-through)
+    // ne sont PAS affectees car lv_display_set_rotation() avec LVGL owns rotation
+    // ne remappe pas l'indev quand touch est deja aligne en brut.
     // Pour la rotation auto via QMI8658 : appeler lv_display_set_rotation()
-    // avec display_get() depuis rotation_manager — aucun autre fichier
-    // ne doit gérer la rotation.
+    // avec display_get() depuis rotation_manager.
     lv_display_set_rotation(_disp, LV_DISPLAY_ROTATION_270);
 
+    Serial.printf("[CO5300] init OK — rotation=270 (LVGL owns rotation)\n");
     Serial.printf("[HAL] display_init OK — phys=%dx%d lv=%dx%d buf=%u B x2\n",
                   LCD_WIDTH_PHYS, LCD_HEIGHT_PHYS,
                   LCD_WIDTH, LCD_HEIGHT, (unsigned)BUF_BYTES);

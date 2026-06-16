@@ -102,7 +102,14 @@ bool hal::touch_update() {
     _last_poll_ms = now;
     const uint8_t max_points = (uint8_t)((_drv.getSupportTouchPoint() < hal::TOUCH_MAX_POINTS) ?
                                          _drv.getSupportTouchPoint() : hal::TOUCH_MAX_POINTS);
-    uint8_t count = _drv.getPoint(_raw_x, _raw_y, max_points);
+
+    // Guard : lire les points uniquement si le driver signale un contact.
+    // getSupportTouchPoint() peut retourner 0 après que l'IRQ soit retombée,
+    // ce qui causait "Invalid touch point index: 0" dans TouchPoints.cpp.
+    uint8_t count = 0;
+    if (max_points > 0) {
+        count = _drv.getPoint(_raw_x, _raw_y, max_points);
+    }
 
     bool was_pressed = _frame.pressed;
     _frame.just_pressed = false;
