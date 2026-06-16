@@ -464,6 +464,17 @@ void ui_launcher_touch(bool pressed, uint16_t x, uint16_t y) {
                 _touch_down = false;
                 _touch_linear = -1;
                 _move_page(dx < 0 ? +1 : -1);
+                return;
+            }
+
+            int linear = _launcher_linear_from_point(x, y);
+            if (linear >= 0) {
+                if (linear != _touch_linear) {
+                    _touch_linear = linear;
+                    _set_selection_from_linear(linear);
+                }
+            } else {
+                _touch_linear = -1;
             }
         }
         return;
