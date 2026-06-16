@@ -71,6 +71,7 @@ static void task_ui_lvgl(void*) {
     for (;;) {
         ui::dispatch_flush();   // exécute les lv_scr_load postés par os_kernel
         lv_timer_handler();
+        lv_indev_read(touch_indev);
         ui::notification_tick();
         uint32_t now = millis();
         if (now - last_status_tick >= 1000) {
