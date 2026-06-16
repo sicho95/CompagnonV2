@@ -5,4 +5,4 @@
 void ui_launcher_init();
 void ui_launcher_show();
 void ui_launcher_btn_tick();
-void ui_launcher_touch(bool pressed, uint16_t x, uint16_t y);
+void ui_launcher_touch_tick();
