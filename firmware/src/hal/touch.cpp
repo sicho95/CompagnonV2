@@ -93,11 +93,11 @@ bool hal::touch_read(uint16_t& x, uint16_t& y) {
 
     _irq_seen = false;
     _last_poll_ms = now;
-    int16_t xs[1] = {0};
-    int16_t ys[1] = {0};
-    uint8_t count = _drv.getPoint(xs, ys, 1);
+    const TouchPoints& points = _drv.getTouchPoints();
+    uint8_t count = points.getPointCount();
     if (count > 0) {
-        _map_touch_to_lvgl(xs[0], ys[0], x, y);
+        const TouchPoint& pt = points.getPoint(0);
+        _map_touch_to_lvgl(pt.x, pt.y, x, y);
         _last_x = x;
         _last_y = y;
         _hold_until_ms = now + 80;
@@ -105,7 +105,7 @@ bool hal::touch_read(uint16_t& x, uint16_t& y) {
         static uint32_t last_raw_log = 0;
         if (now - last_raw_log > 200) {
             Serial.printf("[TOUCH] sensor=%d,%d count=%u -> lv=%u,%u int=%d\n",
-                          xs[0], ys[0], count, x, y,
+                          pt.x, pt.y, count, x, y,
                           digitalRead(PIN_TP_INT));
             last_raw_log = now;
         }
