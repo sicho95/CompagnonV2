@@ -54,7 +54,7 @@ bool hal::touch_init() {
         _drv.setMaxCoordinates(480, 480);
         attachInterrupt(digitalPinToInterrupt(PIN_TP_INT), _touch_irq_isr, FALLING);
         _drv.setSwapXY(true);
-        _drv.setMirrorXY(false, true);
+        _drv.setMirrorXY(true, false);
         _ok = true;
         Serial.printf("[TOUCH] CST9220 OK — %s (RST=%d INT=%d irq=%d)\n",
                       _drv.getModelName(), PIN_TP_RST, PIN_TP_INT,
