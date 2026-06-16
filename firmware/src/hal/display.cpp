@@ -5,6 +5,12 @@
 // Ecran physique 480x480, LVGL en plein ecran pour garder le meme
 // repere que le touch. Les marges boitier restent disponibles
 // uniquement comme safe area pour le layout.
+//
+// ROTATION : LV_DISPLAY_ROTATION_270 correspond à l'orientation
+// physique correcte de la carte Waveshare ESP32-S3-Touch-AMOLED-2.16.
+// LVGL transforme automatiquement le rendu ET les coordonnées touch.
+// Pour la rotation auto (QMI8658), appeler lv_display_set_rotation()
+// via display_get() — c'est le seul point de changement nécessaire.
 // ============================================================
 #include "display.h"
 #include "drivers/co5300.h"
@@ -38,7 +44,7 @@ static void _flush_cb(lv_display_t* disp, const lv_area_t* area,
 namespace hal {
 
 void display_init() {
-    // 1. Init hardware CO5300 en 480x480 physique
+    // 1. Init hardware CO5300 en 480x480 physique (rotation=0 hardware)
     co5300::init();
 
     // 2. Alloue buffers (PSRAM preferee, sinon RAM interne)
@@ -59,7 +65,13 @@ void display_init() {
     lv_display_set_flush_cb(_disp, _flush_cb);
     lv_display_set_buffers(_disp, _buf1, _buf2, BUF_BYTES,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
-    lv_display_set_rotation(_disp, LV_DISPLAY_ROTATION_0);
+
+    // Rotation 270° : orientation physique correcte de la carte Waveshare.
+    // LVGL tourne le rendu ET remappe les coords touch automatiquement.
+    // Pour la rotation auto via QMI8658 : appeler lv_display_set_rotation()
+    // avec display_get() depuis rotation_manager — aucun autre fichier
+    // ne doit gérer la rotation.
+    lv_display_set_rotation(_disp, LV_DISPLAY_ROTATION_270);
 
     Serial.printf("[HAL] display_init OK — phys=%dx%d lv=%dx%d buf=%u B x2\n",
                   LCD_WIDTH_PHYS, LCD_HEIGHT_PHYS,

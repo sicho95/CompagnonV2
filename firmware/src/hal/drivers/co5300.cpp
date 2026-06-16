@@ -5,6 +5,10 @@
 // L'offset boîtier (LCD_MARGIN_H/V) est appliqué dans display.cpp
 // lors du flush. Si le GFX est init en 440x460, draw16bitRGBBitmap
 // clampe les coords et l'image reste collée en haut-gauche.
+//
+// ROTATION : fixée à 0 ici — LVGL est l'unique propriétaire de la
+// rotation via lv_display_set_rotation(). Cela permet la rotation
+// automatique runtime (QMI8658) sans toucher au driver hardware.
 // ============================================================
 #include "co5300.h"
 
@@ -29,11 +33,13 @@ void init() {
         Serial.println("[CO5300] gfx->begin() FAILED");
         return;
     }
-    _gfx->setRotation(LCD_ROTATION);
+    // Rotation hardware fixée à 0 — LVGL gère la rotation en interne
+    // via lv_display_set_rotation(). Ne pas changer cette valeur.
+    _gfx->setRotation(0);
     _gfx->displayOn();
     _gfx->setBrightness(200);
     _gfx->fillScreen(0x0000);
-    Serial.printf("[CO5300] init OK — rotation=%d\n", LCD_ROTATION);
+    Serial.printf("[CO5300] init OK — rotation=0 (LVGL owns rotation)\n");
 }
 
 void flush(int32_t x1, int32_t y1, int32_t x2, int32_t y2,

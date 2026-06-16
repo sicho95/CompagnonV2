@@ -3,6 +3,11 @@
 // CST9220 via SensorLib 0.4.1 — namespace hal
 // IMPORTANT : setPins() configure RST/INT pour SensorLib ; begin()
 // garde SDA/SCL à -1 car Wire est déjà initialisé ailleurs.
+//
+// ROTATION : ce fichier retourne TOUJOURS les coordonnées brutes
+// du capteur CST9220. Il ne connaît pas la rotation courante.
+// C'est LVGL qui transforme les coords touch via lv_display_set_rotation().
+// Ne jamais ajouter de swap/mirror ici — cela casserait la rotation auto.
 // ============================================================
 #include "touch.h"
 #include "../../include/pins.h"
@@ -29,20 +34,13 @@ static int32_t _clamp_i32(int32_t v, int32_t lo, int32_t hi) {
     return v;
 }
 
+// Retourne les coordonnées brutes du CST9220, clampées dans les bornes.
+// LVGL applique la transformation de rotation en interne via
+// lv_display_set_rotation() — aucun swap/mirror ne doit être fait ici.
 static void _map_touch_to_lvgl(int32_t sensor_x, int32_t sensor_y,
                                uint16_t& x, uint16_t& y) {
-    // Reprend la logique du BSP Waveshare:
-    // flags = { mirror_y = 1, swap_xy = 1 } pour la dalle en rotation courante.
-    int32_t tx = sensor_x;
-    int32_t ty = (LCD_HEIGHT_PHYS - 1) - sensor_y;
-
-    const int32_t swapped_x = ty;
-    const int32_t swapped_y = tx;
-
-    int32_t lx = swapped_x;
-    int32_t ly = swapped_y;
-    x = (uint16_t)_clamp_i32(lx, 0, LCD_WIDTH  - 1);
-    y = (uint16_t)_clamp_i32(ly, 0, LCD_HEIGHT - 1);
+    x = (uint16_t)_clamp_i32(sensor_x, 0, LCD_WIDTH  - 1);
+    y = (uint16_t)_clamp_i32(sensor_y, 0, LCD_HEIGHT - 1);
 }
 
 static void _clear_frame_points() {
@@ -67,6 +65,7 @@ bool hal::touch_init() {
         pinMode(PIN_TP_INT, INPUT_PULLUP);
         _drv.setMaxCoordinates(480, 480);
         attachInterrupt(digitalPinToInterrupt(PIN_TP_INT), _touch_irq_isr, FALLING);
+        // Pas de swap/mirror hardware — LVGL gère la rotation
         _drv.setSwapXY(false);
         _drv.setMirrorXY(false, false);
         _ok = true;
