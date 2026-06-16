@@ -23,6 +23,8 @@
 #define GRID_COLS      3
 #define GRID_ROWS      2
 #define LONG_PRESS_MS  600
+#define SWIPE_THRESHOLD_PX  44
+#define SWIPE_AXIS_SLOP_PX  18
 #define HOTSPOT_W      126
 #define HOTSPOT_H      170
 #define ICON_WELL_SZ   104
@@ -59,6 +61,9 @@ static int _cur_page = 0;
 static int _cur_slot = 0;
 static bool _touch_down = false;
 static int  _touch_linear = -1;
+static uint16_t _touch_start_x = 0;
+static uint16_t _touch_start_y = 0;
+static bool _touch_swipe_locked = false;
 
 static const lv_color_t BG_TOP       = LV_COLOR_MAKE(0x00, 0x00, 0x00);
 static const lv_color_t BG_BOTTOM    = LV_COLOR_MAKE(0x00, 0x00, 0x00);
@@ -220,6 +225,19 @@ static void _set_selection_from_linear(int linear) {
 
 static void _move_selection(int delta) {
     _set_selection_from_linear(_linear_index() + delta);
+}
+
+static void _move_page(int delta) {
+    int next_page = _cur_page + delta;
+    if (next_page < 0) next_page = PAGE_COUNT - 1;
+    if (next_page >= PAGE_COUNT) next_page = 0;
+
+    int next_count = _page_item_count(next_page);
+    if (_cur_slot >= next_count) _cur_slot = next_count - 1;
+    if (_cur_slot < 0) _cur_slot = 0;
+    _cur_page = next_page;
+    _sync_selection();
+    Serial.printf("[UI] launcher swipe -> page=%d slot=%d\n", _cur_page, _cur_slot);
 }
 
 static void _launch_desc(const TileDesc& d, const char* source) {
@@ -417,24 +435,46 @@ void ui_launcher_touch(bool pressed, uint16_t x, uint16_t y) {
     if (!launcher_active) {
         _touch_down = false;
         _touch_linear = -1;
+        _touch_swipe_locked = false;
         return;
     }
 
     if (pressed) {
-        int linear = _launcher_linear_from_point(x, y);
-        if (!_touch_down && linear >= 0) {
-            _touch_linear = linear;
-            _set_selection_from_linear(linear);
-            _touch_down = true;
+        if (!_touch_down) {
+            _touch_start_x = x;
+            _touch_start_y = y;
+            _touch_swipe_locked = false;
+            int linear = _launcher_linear_from_point(x, y);
+            if (linear >= 0) {
+                _touch_linear = linear;
+                _set_selection_from_linear(linear);
+                _touch_down = true;
+            }
+            return;
+        }
+
+        if (!_touch_swipe_locked) {
+            int32_t dx = (int32_t)x - (int32_t)_touch_start_x;
+            int32_t dy = (int32_t)y - (int32_t)_touch_start_y;
+            int32_t adx = dx >= 0 ? dx : -dx;
+            int32_t ady = dy >= 0 ? dy : -dy;
+
+            if (adx >= SWIPE_THRESHOLD_PX && adx > (ady + SWIPE_AXIS_SLOP_PX)) {
+                _touch_swipe_locked = true;
+                _touch_down = false;
+                _touch_linear = -1;
+                _move_page(dx < 0 ? +1 : -1);
+            }
         }
         return;
     }
 
-    if (_touch_down && _touch_linear >= 0) {
+    if (_touch_down && !_touch_swipe_locked && _touch_linear >= 0) {
         _launch_desc(APPS[_touch_linear], "touch");
     }
     _touch_down = false;
     _touch_linear = -1;
+    _touch_swipe_locked = false;
 }
 
 void ui_launcher_init() {
