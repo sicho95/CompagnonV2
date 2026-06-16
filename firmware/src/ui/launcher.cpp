@@ -256,22 +256,29 @@ static void _launch_current() {
 static int _launcher_linear_from_point(uint16_t x, uint16_t y) {
     if (!_screen || lv_scr_act() != _screen) return -1;
 
+    int best_linear = -1;
+    int32_t best_d2 = INT32_MAX;
     for (int i = 0; i < _page_item_count(_cur_page); ++i) {
-        lv_obj_t* slot = _slots[_cur_page][i];
-        if (!slot) continue;
+        lv_obj_t* card = _cards[_cur_page][i];
+        if (!card) continue;
 
         lv_area_t a;
-        lv_obj_get_coords(slot, &a);
-        a.x1 -= 10;
-        a.y1 -= 10;
-        a.x2 += 10;
-        a.y2 += 10;
-        if ((int32_t)x >= a.x1 && (int32_t)x <= a.x2 &&
-            (int32_t)y >= a.y1 && (int32_t)y <= a.y2) {
-            return _page_start_index(_cur_page) + i;
+        lv_obj_get_coords(card, &a);
+        int32_t cx = (a.x1 + a.x2) / 2;
+        int32_t cy = (a.y1 + a.y2) / 2;
+        int32_t dx = (int32_t)x - cx;
+        int32_t dy = (int32_t)y - cy;
+        int32_t d2 = dx * dx + dy * dy;
+        if (d2 < best_d2) {
+            best_d2 = d2;
+            best_linear = _page_start_index(_cur_page) + i;
         }
     }
-    return -1;
+
+    const int32_t max_dx = HOTSPOT_W;
+    const int32_t max_dy = HOTSPOT_H;
+    const int32_t max_d2 = max_dx * max_dx + max_dy * max_dy;
+    return (best_d2 <= max_d2) ? best_linear : -1;
 }
 
 static lv_obj_t* _make_icon_well(lv_obj_t* parent, const char* icon) {
@@ -465,16 +472,6 @@ void ui_launcher_touch(bool pressed, uint16_t x, uint16_t y) {
                 _touch_linear = -1;
                 _move_page(dx < 0 ? +1 : -1);
                 return;
-            }
-
-            int linear = _launcher_linear_from_point(x, y);
-            if (linear >= 0) {
-                if (linear != _touch_linear) {
-                    _touch_linear = linear;
-                    _set_selection_from_linear(linear);
-                }
-            } else {
-                _touch_linear = -1;
             }
         }
         return;
