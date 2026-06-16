@@ -25,7 +25,7 @@ void ui_app_header_attach(lv_obj_t* screen) {
     lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, -12, HEADER_TOP_Y);
     lv_obj_set_style_radius(close_btn, 14, 0);
     lv_obj_set_style_bg_color(close_btn, lv_color_hex(0x101826), 0);
-    lv_obj_set_style_bg_opa(close_btn, LV_OPA_85, 0);
+    lv_obj_set_style_bg_opa(close_btn, LV_OPA_80, 0);
     lv_obj_set_style_border_width(close_btn, 1, 0);
     lv_obj_set_style_border_color(close_btn, lv_color_hex(0x27344A), 0);
     lv_obj_set_style_shadow_width(close_btn, 0, 0);
