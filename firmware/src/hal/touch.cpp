@@ -14,10 +14,10 @@
 static TouchDrvCST92xx _drv;
 static bool _ok = false;
 static volatile bool _irq_seen = false;
-static uint16_t _last_x = 0;
-static uint16_t _last_y = 0;
-static uint32_t _hold_until_ms = 0;
 static uint32_t _last_poll_ms = 0;
+static hal::TouchFrame _frame = {};
+static int16_t _raw_x[hal::TOUCH_MAX_POINTS] = {0};
+static int16_t _raw_y[hal::TOUCH_MAX_POINTS] = {0};
 
 static void IRAM_ATTR _touch_irq_isr() {
     _irq_seen = true;
@@ -35,6 +35,12 @@ static void _map_touch_to_lvgl(int32_t sensor_x, int32_t sensor_y,
     int32_t ly = sensor_y - LCD_MARGIN_V;
     x = (uint16_t)_clamp_i32(lx, 0, LCD_WIDTH  - 1);
     y = (uint16_t)_clamp_i32(ly, 0, LCD_HEIGHT - 1);
+}
+
+static void _clear_frame_points() {
+    for (uint8_t i = 0; i < hal::TOUCH_MAX_POINTS; ++i) {
+        _frame.points[i] = {};
+    }
 }
 
 bool hal::touch_init() {
@@ -67,19 +73,13 @@ bool hal::touch_init() {
     return _ok;
 }
 
-bool hal::touch_read(uint16_t& x, uint16_t& y) {
+bool hal::touch_update() {
     if (!_ok) return false;
 
     uint32_t now = millis();
     bool irq_active = (digitalRead(PIN_TP_INT) == LOW);
     bool poll_due = (now - _last_poll_ms) >= 12;
     bool should_read = _irq_seen || irq_active || poll_due;
-
-    if (!should_read && now < _hold_until_ms) {
-        x = _last_x;
-        y = _last_y;
-        return true;
-    }
 
     static uint32_t last_idle_log = 0;
     if (!should_read) {
@@ -88,33 +88,66 @@ bool hal::touch_read(uint16_t& x, uint16_t& y) {
                           digitalRead(PIN_TP_INT), _irq_seen ? 1 : 0);
             last_idle_log = now;
         }
-        return false;
+        return _frame.pressed;
     }
 
     _irq_seen = false;
     _last_poll_ms = now;
-    const TouchPoints& points = _drv.getTouchPoints();
-    uint8_t count = points.getPointCount();
+    const uint8_t max_points = (uint8_t)((_drv.getSupportTouchPoint() < hal::TOUCH_MAX_POINTS) ?
+                                         _drv.getSupportTouchPoint() : hal::TOUCH_MAX_POINTS);
+    uint8_t count = _drv.getPoint(_raw_x, _raw_y, max_points);
+
+    bool was_pressed = _frame.pressed;
+    _frame.just_pressed = false;
+    _frame.just_released = false;
+    _frame.timestamp_ms = now;
+    _clear_frame_points();
+
     if (count > 0) {
-        const TouchPoint& pt = points.getPoint(0);
-        _map_touch_to_lvgl(pt.x, pt.y, x, y);
-        _last_x = x;
-        _last_y = y;
-        _hold_until_ms = now + 80;
+        _frame.pressed = true;
+        _frame.point_count = count;
+        _frame.just_pressed = !was_pressed;
+
+        for (uint8_t i = 0; i < count && i < hal::TOUCH_MAX_POINTS; ++i) {
+            uint16_t x = 0;
+            uint16_t y = 0;
+            _map_touch_to_lvgl(_raw_x[i], _raw_y[i], x, y);
+            _frame.points[i].valid = true;
+            _frame.points[i].raw_x = _raw_x[i];
+            _frame.points[i].raw_y = _raw_y[i];
+            _frame.points[i].x = x;
+            _frame.points[i].y = y;
+        }
 
         static uint32_t last_raw_log = 0;
         if (now - last_raw_log > 200) {
             Serial.printf("[TOUCH] sensor=%d,%d count=%u -> lv=%u,%u int=%d\n",
-                          pt.x, pt.y, count, x, y,
+                          _frame.points[0].raw_x, _frame.points[0].raw_y,
+                          count, _frame.points[0].x, _frame.points[0].y,
                           digitalRead(PIN_TP_INT));
             last_raw_log = now;
         }
         return true;
     }
-    _hold_until_ms = 0;
+
+    _frame.pressed = false;
+    _frame.point_count = 0;
+    _frame.just_released = was_pressed;
     return false;
 }
 
+bool hal::touch_read(uint16_t& x, uint16_t& y) {
+    if (!touch_update()) return false;
+    if (!_frame.pressed || !_frame.points[0].valid) return false;
+    x = _frame.points[0].x;
+    y = _frame.points[0].y;
+    return true;
+}
+
 bool hal::touch_has_data() {
-    return _ok && _drv.isPressed();
+    return _ok && _frame.pressed;
+}
+
+const hal::TouchFrame& hal::touch_frame() {
+    return _frame;
 }
