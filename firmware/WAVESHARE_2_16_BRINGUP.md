@@ -174,17 +174,17 @@ Code retenu dans [src/hal/touch.cpp](/Users/damien/Documents/Arduino/CompagnonV2
 ```cpp
 _drv.setMaxCoordinates(480, 480);
 _drv.setSwapXY(true);
-_drv.setMirrorXY(false, true);
+_drv.setMirrorXY(true, false);
 ```
 
 et pour la lecture:
 
 ```cpp
-int16_t xs[1] = {0};
-int16_t ys[1] = {0};
-uint8_t count = _drv.getPoint(xs, ys, 1);
+const TouchPoints& points = _drv.getTouchPoints();
+uint8_t count = points.getPointCount();
 if (count > 0) {
-    _map_touch_to_lvgl(xs[0], ys[0], x, y);
+    const TouchPoint& pt = points.getPoint(0);
+    _map_touch_to_lvgl(pt.x, pt.y, x, y);
     return true;
 }
 ```
@@ -203,8 +203,15 @@ puis on clamp vers la zone LVGL `440x460`.
 Cette combinaison fonctionne avec:
 
 - `setSwapXY(true)`
-- `setMirrorXY(false, true)`
+- `setMirrorXY(true, false)`
 - `rotation=3` côté écran
+- les marges visibles `20 px / 10 px` retranchées après lecture capteur
+
+Ce réglage est aligné sur l'exemple Waveshare LVGL pour cette carte. Le symptôme typique d'un miroir faux était simple:
+
+- le touch semblait "vivre"
+- les logs montraient des coordonnées plausibles
+- mais le clic tombait sur la mauvaise icône ou sur la mauvaise app
 
 ## Touch IRQ
 
@@ -282,7 +289,7 @@ Ca indiquait un mauvais chemin de lecture tactile bas niveau. Le correctif utile
 
 Ce log apparaît si on demande un point alors que l'objet interne n'a pas de point valide au moment précis de l'accès.
 
-La lecture via `getPoint(xs, ys, 1)` est plus robuste ici que la manipulation manuelle du `TouchPoints` interne.
+Ce log apparaissait avec une ancienne variante. La lecture actuelle via `getTouchPoints()` puis `getPoint(0)` uniquement quand `count > 0` évite ce faux accès.
 
 ## Réglages de build validés
 
@@ -313,6 +320,7 @@ Commande de compilation utilisée côté CLI:
 5. Ne pas réinitialiser `Wire` dans le module touch.
 6. Garder une seule tâche propriétaire de LVGL.
 7. Faire en sorte que la zone tactile d'une icône soit plus grande que son dessin.
+8. Si le tactile lance la mauvaise app, vérifier d'abord `swap/mirror` avant de toucher à la logique du launcher.
 
 ## Ce qu'il reste à faire plus tard
 
