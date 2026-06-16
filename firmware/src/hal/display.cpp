@@ -6,12 +6,12 @@
 // repere que le touch. Les marges boitier restent disponibles
 // uniquement comme safe area pour le layout.
 //
-// ROTATION : LV_DISPLAY_ROTATION_270 (-90°) corrige le rendu
-// physique de la carte Waveshare ESP32-S3-Touch-AMOLED-2.16.
-// LVGL transforme uniquement le rendu — les coords touch restent
-// en rotation=0 (pass-through brut CST9220 deja aligne).
-// Pour la rotation auto (QMI8658), appeler lv_display_set_rotation()
-// via display_get() — c'est le seul point de changement necessaire.
+// ROTATION : LV_DISPLAY_ROTATION_0 — premier test.
+// Si le rendu est encore de 90°, tester ROTATION_90 puis ROTATION_180.
+// L'indev touch applique la transformation inverse en temps reel
+// via display_get_rotation() — voir os_main.cpp _touch_read_cb.
+// Pour la rotation auto (QMI8658), appeler display_set_rotation()
+// qui met à jour le display LVGL ET invalide l'indev automatiquement.
 // ============================================================
 #include "display.h"
 #include "drivers/co5300.h"
@@ -67,21 +67,27 @@ void display_init() {
     lv_display_set_buffers(_disp, _buf1, _buf2, BUF_BYTES,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
-    // ROTATION_270 (-90 deg) : corrige le rendu physique de la carte Waveshare.
-    // LVGL tourne uniquement le rendu — les coords touch (rotation=0 pass-through)
-    // ne sont PAS affectees car lv_display_set_rotation() avec LVGL owns rotation
-    // ne remappe pas l'indev quand touch est deja aligne en brut.
-    // Pour la rotation auto via QMI8658 : appeler lv_display_set_rotation()
-    // avec display_get() depuis rotation_manager.
-    lv_display_set_rotation(_disp, LV_DISPLAY_ROTATION_270);
+    // TEST ROTATION_0 — si rendu 90° de trop -> tester ROTATION_90 puis ROTATION_180
+    lv_display_set_rotation(_disp, LV_DISPLAY_ROTATION_0);
 
-    Serial.printf("[CO5300] init OK — rotation=270 (LVGL owns rotation)\n");
+    Serial.printf("[CO5300] init OK — rotation=0 (test)\n");
     Serial.printf("[HAL] display_init OK — phys=%dx%d lv=%dx%d buf=%u B x2\n",
                   LCD_WIDTH_PHYS, LCD_HEIGHT_PHYS,
                   LCD_WIDTH, LCD_HEIGHT, (unsigned)BUF_BYTES);
 }
 
-lv_display_t* display_get()  { return _disp; }
+lv_display_t* display_get() { return _disp; }
+
+lv_display_rotation_t display_get_rotation() {
+    if (!_disp) return LV_DISPLAY_ROTATION_0;
+    return lv_display_get_rotation(_disp);
+}
+
+void display_set_rotation(lv_display_rotation_t rot) {
+    if (!_disp) return;
+    lv_display_set_rotation(_disp, rot);
+    Serial.printf("[HAL] display_set_rotation -> %d\n", (int)rot);
+}
 
 void display_set_brightness(uint8_t pct) {
     if (co5300::gfx()) co5300::gfx()->setBrightness(pct * 255 / 100);
