@@ -8,6 +8,7 @@
 // ============================================================
 #include "status_bar.h"
 #include "../hal/pmu.h"
+#include "../hal/touch.h"
 #include <lvgl.h>
 #include <Arduino.h>
 #include <time.h>
@@ -20,6 +21,15 @@
 static lv_obj_t* _bar        = nullptr;
 static lv_obj_t* _lbl_time   = nullptr;   // heure HH:MM
 static lv_obj_t* _lbl_icons  = nullptr;   // WiFi + BLE + batterie (droite)
+static bool      _touch_track = false;
+static bool      _touch_swipe = false;
+static int16_t   _touch_start_x = 0;
+static int16_t   _touch_start_y = 0;
+
+namespace {
+constexpr int STATUS_SWIPE_THRESHOLD_PX = 50;
+constexpr int STATUS_SWIPE_AXIS_SLOP_PX = 18;
+}
 
 // ── Création ───────────────────────────────────────────────────────────────
 void ui_status_bar_init() {
@@ -94,6 +104,37 @@ void ui_status_bar_tick() {
 
     lv_obj_align(_lbl_time,  LV_ALIGN_LEFT_MID,  0, 0);
     lv_obj_align(_lbl_icons, LV_ALIGN_RIGHT_MID, 0, 0);
+}
+
+void ui_status_bar_touch_tick() {
+    const hal::TouchFrame& frame = hal::touch_frame();
+    if (!_bar) return;
+
+    if (frame.just_pressed && frame.point_count > 0 && frame.points[0].valid) {
+        _touch_track = (frame.points[0].y < STATUS_BAR_H);
+        _touch_swipe = false;
+        _touch_start_x = frame.points[0].x;
+        _touch_start_y = frame.points[0].y;
+        return;
+    }
+
+    if (_touch_track && frame.pressed && frame.point_count > 0 && frame.points[0].valid && !_touch_swipe) {
+        const int16_t dx = frame.points[0].x - _touch_start_x;
+        const int16_t dy = frame.points[0].y - _touch_start_y;
+        const int16_t adx = dx >= 0 ? dx : -dx;
+        const int16_t ady = dy >= 0 ? dy : -dy;
+        if (dy > STATUS_SWIPE_THRESHOLD_PX && ady > (adx + STATUS_SWIPE_AXIS_SLOP_PX)) {
+            _touch_swipe = true;
+            Serial.println("[UI] status swipe down");
+            ui_power_menu_show();
+        }
+        return;
+    }
+
+    if (frame.just_released || !frame.pressed) {
+        _touch_track = false;
+        _touch_swipe = false;
+    }
 }
 
 void ui_power_menu_show() {
