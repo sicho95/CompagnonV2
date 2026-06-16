@@ -1,14 +1,15 @@
 // ============================================================
 // CompagnonV2 — hal/display.h
+// LCD_WIDTH / LCD_HEIGHT / LCD_WIDTH_PHYS / LCD_HEIGHT_PHYS
+// sont définis dans include/pins.h — source de vérité unique.
+// Ne pas les redéfinir ici.
 // ============================================================
 #pragma once
 #include <lvgl.h>
 #include <cstdint>
 
-#define LCD_WIDTH_PHYS  480
-#define LCD_HEIGHT_PHYS 480
-#define LCD_WIDTH       480
-#define LCD_HEIGHT      480
+// pins.h est la source de vérité pour LCD_WIDTH/HEIGHT
+// (inclus transitivement via pmu.h ou directement)
 
 namespace hal {
     void                  display_init();

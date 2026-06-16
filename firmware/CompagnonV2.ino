@@ -119,7 +119,7 @@ void setup() {
     secrets_provision();
 
     // 4-7. Hardware suite
-    hal_display_init();   // co5300::init() + lv_display_create() + buffers
+    hal::display_init();   // co5300::init() + lv_display_create() + buffers
     hal_touch_init();
     hal_imu_init();
     hal_audio_init();
