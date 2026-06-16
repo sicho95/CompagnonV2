@@ -28,9 +28,16 @@
 #define LCD_MARGIN_H      20
 #define LCD_MARGIN_V      10
 
-// Zone utile LVGL (ce que l'utilisateur voit)
-#define LCD_WIDTH        (LCD_WIDTH_PHYS  - 2 * LCD_MARGIN_H)   // 440
-#define LCD_HEIGHT       (LCD_HEIGHT_PHYS - 2 * LCD_MARGIN_V)   // 460
+// Résolution logique LVGL: on garde le plein 480x480 pour aligner
+// exactement le repère tactile et le repère écran.
+#define LCD_WIDTH        LCD_WIDTH_PHYS
+#define LCD_HEIGHT       LCD_HEIGHT_PHYS
+
+// Safe area éventuelle pour le layout applicatif.
+#define LCD_SAFE_X       LCD_MARGIN_H
+#define LCD_SAFE_Y       LCD_MARGIN_V
+#define LCD_SAFE_WIDTH   (LCD_WIDTH_PHYS  - 2 * LCD_MARGIN_H)   // 440
+#define LCD_SAFE_HEIGHT  (LCD_HEIGHT_PHYS - 2 * LCD_MARGIN_V)   // 460
 
 // Rotation CO5300/MADCTL. Le driver ne fait pas de vraie rotation 90 degres,
 // mais cette valeur conserve le mode d'affichage visible sur la carte.
