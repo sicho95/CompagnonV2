@@ -35,6 +35,7 @@
 #include "src/system/os_kernel.h"
 #include "src/system/power_mgr.h"
 #include "src/config/nvs_config.h"
+#include "src/storage/nvs_store.h"
 #include "src/ui/status_bar.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -69,7 +70,11 @@ static void secrets_provision() {
     provision(NVS_KEY_SERPER,      SECRET_SERPER_KEY);
     provision(NVS_KEY_OPENROUTER,  SECRET_OPENROUTER_KEY);
     provision(NVS_KEY_TWELVEDATA,  SECRET_TWELVE_DATA_KEY);
-    provision(NVS_KEY_METEO,       DEV_METEO_CONCEPT_TOKEN);  // Météo-Concept
+#if defined(DEV_METEO_CONCEPT_TOKEN)
+    provision(NVS_KEY_METEO,       DEV_METEO_CONCEPT_TOKEN);
+#elif defined(SECRET_WEATHER_API_KEY)
+    provision(NVS_KEY_METEO,       SECRET_WEATHER_API_KEY);
+#endif
     provision(NVS_KEY_SPOTIFY_ID,  SECRET_SPOTIFY_CLIENT_ID);
     provision(NVS_KEY_SPOTIFY_SEC, SECRET_SPOTIFY_CLIENT_SEC);
     provision(NVS_KEY_TUYA_ID,     SECRET_TUYA_ACCESS_ID);
@@ -78,12 +83,14 @@ static void secrets_provision() {
     provision(NVS_KEY_ECOVACS_P,   SECRET_ECOVACS_PASSWORD);
 
     {
-        char existing[64] = {};
-        if (!cfg_get_str("wifi_ssid", existing, sizeof(existing), "") || existing[0] == '\0') {
-            cfg_set_str("wifi_ssid", DEV_WIFI_SSID);
-            cfg_set_str("wifi_pass", DEV_WIFI_PASS);
+        String existing = NvsStore::getString("wifi", "ssid", "");
+        if (existing.isEmpty()) {
+#if defined(SECRET_WIFI_SSID) && defined(SECRET_WIFI_PASS)
+            NvsStore::setString("wifi", "ssid", SECRET_WIFI_SSID);
+            NvsStore::setString("wifi", "pass", SECRET_WIFI_PASS);
             Serial.println("  [NVS] wifi → écrit");
             written++;
+#endif
         }
     }
 

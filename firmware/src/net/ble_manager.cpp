@@ -14,6 +14,7 @@
 //      Les services sont demarres automatiquement par _server->start()
 // ============================================================
 #include "ble_manager.h"
+#include "wifi_mgr.h"
 #include <NimBLEDevice.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
@@ -64,12 +65,10 @@ class CharCB : public NimBLECharacteristicCallbacks {
         if (uuid == CHR_WIFI_PROV) {
             JsonDocument d;
             if (!deserializeJson(d, val)) {
-                Preferences p;
-                p.begin("wifi_config", false);
-                p.putString("ssid", d["ssid"] | "");
-                p.putString("pass", d["pass"] | "");
-                p.end();
-                Serial.println("[BLE] WiFi credentials saved");
+                String ssid = d["ssid"] | "";
+                String pass = d["pass"] | "";
+                WifiMgr::saveCredentials(ssid, pass);
+                Serial.printf("[BLE] WiFi credentials saved: %s\n", ssid.c_str());
             }
         }
         else if (uuid == CHR_TEXT_INPUT && _on_text)  _on_text(val);

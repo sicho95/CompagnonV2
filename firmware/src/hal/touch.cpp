@@ -39,8 +39,8 @@ static void _map_touch_to_lvgl(int32_t sensor_x, int32_t sensor_y,
     const int32_t swapped_x = ty;
     const int32_t swapped_y = tx;
 
-    int32_t lx = swapped_x - LCD_MARGIN_H;
-    int32_t ly = swapped_y - LCD_MARGIN_V;
+    int32_t lx = swapped_x;
+    int32_t ly = swapped_y;
     x = (uint16_t)_clamp_i32(lx, 0, LCD_WIDTH  - 1);
     y = (uint16_t)_clamp_i32(ly, 0, LCD_HEIGHT - 1);
 }
