@@ -11,6 +11,7 @@
 #include "launcher.h"
 #include "status_bar.h"
 #include "../hal/display.h"
+#include "../hal/touch.h"
 #include "../system/os_kernel.h"
 #include "../config/nvs_config.h"
 #include "../../include/pins.h"
@@ -57,13 +58,20 @@ static lv_obj_t* _dots[PAGE_COUNT] = {};
 static lv_obj_t* _bg_objs[16] = {};
 static uint8_t   _bg_obj_count = 0;
 
+struct TileEventCtx {
+    int  linear = -1;
+    bool press_lost = false;
+};
+static TileEventCtx _tile_ctx[PAGE_COUNT][PAGE_SIZE] = {};
+
 static int _cur_page = 0;
 static int _cur_slot = 0;
-static bool _touch_down = false;
-static int  _touch_linear = -1;
-static uint16_t _touch_start_x = 0;
-static uint16_t _touch_start_y = 0;
-static bool _touch_swipe_locked = false;
+static bool _gesture_track = false;
+static bool _gesture_swipe_locked = false;
+static bool _gesture_click_suppressed = false;
+static bool _gesture_status_origin = false;
+static int16_t _gesture_start_x = 0;
+static int16_t _gesture_start_y = 0;
 
 static const lv_color_t BG_TOP       = LV_COLOR_MAKE(0x00, 0x00, 0x00);
 static const lv_color_t BG_BOTTOM    = LV_COLOR_MAKE(0x00, 0x00, 0x00);
@@ -74,6 +82,8 @@ static const lv_color_t LABEL_IDLE   = LV_COLOR_MAKE(0xDC, 0xE5, 0xF2);
 static const lv_color_t LABEL_ACTIVE = LV_COLOR_MAKE(0xFF, 0xFF, 0xFF);
 static const lv_color_t DOT_IDLE     = LV_COLOR_MAKE(0x45, 0x52, 0x70);
 static const lv_color_t DOT_ACTIVE   = LV_COLOR_MAKE(0xE8, 0xF3, 0xFF);
+
+static void _tile_event_cb(lv_event_t* e);
 
 static void _bg_track(lv_obj_t* obj) {
     if (_bg_obj_count < (sizeof(_bg_objs) / sizeof(_bg_objs[0]))) {
@@ -253,34 +263,6 @@ static void _launch_current() {
     _launch_desc(APPS[_linear_index()], "btn");
 }
 
-static int _launcher_linear_from_point(uint16_t x, uint16_t y) {
-    if (!_screen || lv_scr_act() != _screen) return -1;
-
-    int best_linear = -1;
-    int32_t best_d2 = INT32_MAX;
-    for (int i = 0; i < _page_item_count(_cur_page); ++i) {
-        lv_obj_t* card = _cards[_cur_page][i];
-        if (!card) continue;
-
-        lv_area_t a;
-        lv_obj_get_coords(card, &a);
-        int32_t cx = (a.x1 + a.x2) / 2;
-        int32_t cy = (a.y1 + a.y2) / 2;
-        int32_t dx = (int32_t)x - cx;
-        int32_t dy = (int32_t)y - cy;
-        int32_t d2 = dx * dx + dy * dy;
-        if (d2 < best_d2) {
-            best_d2 = d2;
-            best_linear = _page_start_index(_cur_page) + i;
-        }
-    }
-
-    const int32_t max_dx = HOTSPOT_W;
-    const int32_t max_dy = HOTSPOT_H;
-    const int32_t max_d2 = max_dx * max_dx + max_dy * max_dy;
-    return (best_d2 <= max_d2) ? best_linear : -1;
-}
-
 static lv_obj_t* _make_icon_well(lv_obj_t* parent, const char* icon) {
     lv_obj_t* well = lv_obj_create(parent);
     lv_obj_set_size(well, ICON_WELL_SZ, ICON_WELL_SZ);
@@ -347,6 +329,14 @@ static void _build_page(lv_obj_t* parent, int page) {
         lv_obj_set_style_pad_left(card, 4, 0);
         lv_obj_set_style_pad_right(card, 4, 0);
         lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(card, LV_OBJ_FLAG_EVENT_BUBBLE);
+        _tile_ctx[page][i].linear = start + i;
+        _tile_ctx[page][i].press_lost = false;
+        lv_obj_add_event_cb(card, _tile_event_cb, LV_EVENT_PRESSED, &_tile_ctx[page][i]);
+        lv_obj_add_event_cb(card, _tile_event_cb, LV_EVENT_PRESS_LOST, &_tile_ctx[page][i]);
+        lv_obj_add_event_cb(card, _tile_event_cb, LV_EVENT_RELEASED, &_tile_ctx[page][i]);
+        lv_obj_add_event_cb(card, _tile_event_cb, LV_EVENT_CLICKED, &_tile_ctx[page][i]);
 
         lv_obj_t* col_cont = lv_obj_create(card);
         lv_obj_set_size(col_cont, LV_PCT(100), LV_PCT(100));
@@ -374,6 +364,32 @@ static void _build_page(lv_obj_t* parent, int page) {
 
         lv_obj_add_flag(well, LV_OBJ_FLAG_EVENT_BUBBLE);
         lv_obj_add_flag(lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
+    }
+}
+
+static void _tile_event_cb(lv_event_t* e) {
+    TileEventCtx* ctx = static_cast<TileEventCtx*>(lv_event_get_user_data(e));
+    if (!ctx || ctx->linear < 0 || ctx->linear >= APP_COUNT) return;
+    if (!_screen || lv_scr_act() != _screen) return;
+
+    switch (lv_event_get_code(e)) {
+        case LV_EVENT_PRESSED:
+            ctx->press_lost = false;
+            _set_selection_from_linear(ctx->linear);
+            break;
+        case LV_EVENT_PRESS_LOST:
+            ctx->press_lost = true;
+            break;
+        case LV_EVENT_RELEASED:
+            break;
+        case LV_EVENT_CLICKED:
+            if (!_gesture_click_suppressed && !ctx->press_lost) {
+                _set_selection_from_linear(ctx->linear);
+                _launch_desc(APPS[ctx->linear], "touch");
+            }
+            break;
+        default:
+            break;
     }
 }
 
@@ -435,54 +451,51 @@ void ui_launcher_btn_tick() {
     _boot_was_low = boot_low;
 }
 
-void ui_launcher_touch(bool pressed, uint16_t x, uint16_t y) {
+void ui_launcher_touch_tick() {
     if (!_screen) return;
-    bool launcher_active = (lv_scr_act() == _screen);
+    const bool launcher_active = (lv_scr_act() == _screen);
+    const hal::TouchFrame& frame = hal::touch_frame();
 
     if (!launcher_active) {
-        _touch_down = false;
-        _touch_linear = -1;
-        _touch_swipe_locked = false;
+        _gesture_track = false;
+        _gesture_swipe_locked = false;
+        _gesture_click_suppressed = false;
+        _gesture_status_origin = false;
         return;
     }
 
-    if (pressed) {
-        if (!_touch_down) {
-            _touch_start_x = x;
-            _touch_start_y = y;
-            _touch_swipe_locked = false;
-            int linear = _launcher_linear_from_point(x, y);
-            if (linear >= 0) {
-                _touch_linear = linear;
-                _set_selection_from_linear(linear);
-                _touch_down = true;
-            }
-            return;
-        }
+    if (frame.just_pressed && frame.point_count > 0 && frame.points[0].valid) {
+        _gesture_track = true;
+        _gesture_swipe_locked = false;
+        _gesture_click_suppressed = false;
+        _gesture_status_origin = (frame.points[0].y < STATUS_BAR_H);
+        _gesture_start_x = frame.points[0].x;
+        _gesture_start_y = frame.points[0].y;
+        return;
+    }
 
-        if (!_touch_swipe_locked) {
-            int32_t dx = (int32_t)x - (int32_t)_touch_start_x;
-            int32_t dy = (int32_t)y - (int32_t)_touch_start_y;
-            int32_t adx = dx >= 0 ? dx : -dx;
-            int32_t ady = dy >= 0 ? dy : -dy;
+    if (_gesture_track && frame.pressed && frame.point_count > 0 && frame.points[0].valid && !_gesture_swipe_locked) {
+        if (_gesture_status_origin) return;
 
-            if (adx >= SWIPE_THRESHOLD_PX && adx > (ady + SWIPE_AXIS_SLOP_PX)) {
-                _touch_swipe_locked = true;
-                _touch_down = false;
-                _touch_linear = -1;
-                _move_page(dx < 0 ? +1 : -1);
-                return;
-            }
+        const int32_t dx = (int32_t)frame.points[0].x - (int32_t)_gesture_start_x;
+        const int32_t dy = (int32_t)frame.points[0].y - (int32_t)_gesture_start_y;
+        const int32_t adx = dx >= 0 ? dx : -dx;
+        const int32_t ady = dy >= 0 ? dy : -dy;
+
+        if (adx >= SWIPE_THRESHOLD_PX && adx > (ady + SWIPE_AXIS_SLOP_PX)) {
+            _gesture_swipe_locked = true;
+            _gesture_click_suppressed = true;
+            _move_page(dx < 0 ? +1 : -1);
         }
         return;
     }
 
-    if (_touch_down && !_touch_swipe_locked && _touch_linear >= 0) {
-        _launch_desc(APPS[_touch_linear], "touch");
+    if (frame.just_released || !frame.pressed) {
+        _gesture_track = false;
+        _gesture_swipe_locked = false;
+        _gesture_click_suppressed = false;
+        _gesture_status_origin = false;
     }
-    _touch_down = false;
-    _touch_linear = -1;
-    _touch_swipe_locked = false;
 }
 
 void ui_launcher_init() {
