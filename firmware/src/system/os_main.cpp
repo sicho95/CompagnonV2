@@ -5,24 +5,16 @@
 // Fix thread-safety LVGL : dispatch_flush() dans task_ui_lvgl
 // Fix WiFi : stop reconnect quand pas de SSID
 //
-// TOUCH COORDS — Option B (évolutive QMI8658) :
-// _touch_read_cb applique la transformation DIRECTE correspondant
-// à la rotation LVGL courante (lue dynamiquement via display_get_rotation()).
-// LVGL applique ensuite la transformation INVERSE via lv_indev_set_display().
-// Les deux s'annulent -> zones de hit correctes quelle que soit la rotation.
-// Supporte la rotation dynamique (QMI8658) sans aucune modification future.
-//
-// Formules (W = hor_res, H = ver_res, lus dynamiquement) :
-//   ROT_0   : lv_x = raw_x,       lv_y = raw_y
-//   ROT_90  : lv_x = raw_y,       lv_y = (W-1) - raw_x
-//   ROT_180 : lv_x = (W-1)-raw_x, lv_y = (H-1) - raw_y
-//   ROT_270 : lv_x = (H-1)-raw_y, lv_y = raw_x
+// TOUCH COORDS :
+// touch.cpp publie frame.points[].x/y dans le repère LVGL visible.
+// LVGL reste en rotation interne 0 pour éviter une deuxième transformation.
 // ============================================================
 #include "os_main.h"
 #include "os_kernel.h"
 #include "../hal/rtc.h"
 #include "../hal/touch.h"
 #include "../hal/display.h"
+#include "../hal/imu.h"
 #include "../ui/status_bar.h"
 #include "../ui/launcher.h"
 #include "../ui/notification_mgr.h"
@@ -46,55 +38,28 @@ static TaskHandle_t _h_voice = nullptr;
 static TaskHandle_t _h_ble   = nullptr;
 static TaskHandle_t _h_net   = nullptr;
 
-// Applique la transformation directe correspondant à la rotation LVGL courante.
-// W et H sont lus dynamiquement depuis le display pour éviter tout hardcodage.
-// LVGL applique la transformation inverse via lv_indev_set_display() :
-// les deux s'annulent -> coords correctes quelle que soit la rotation.
-static void _apply_rotation(uint16_t raw_x, uint16_t raw_y,
-                            int32_t& out_x, int32_t& out_y) {
-    lv_display_t* disp = hal::display_get();
-    const lv_display_rotation_t rot = hal::display_get_rotation();
-    const int32_t W = disp ? (int32_t)lv_display_get_horizontal_resolution(disp) : 480;
-    const int32_t H = disp ? (int32_t)lv_display_get_vertical_resolution(disp)   : 480;
-    const int32_t rx = (int32_t)raw_x;
-    const int32_t ry = (int32_t)raw_y;
-    switch (rot) {
-        case LV_DISPLAY_ROTATION_0:
-            out_x = rx;
-            out_y = ry;
-            break;
-        case LV_DISPLAY_ROTATION_90:
-            out_x = ry;
-            out_y = (W - 1) - rx;
-            break;
-        case LV_DISPLAY_ROTATION_180:
-            out_x = (W - 1) - rx;
-            out_y = (H - 1) - ry;
-            break;
-        case LV_DISPLAY_ROTATION_270:
-            out_x = (H - 1) - ry;
-            out_y = rx;
-            break;
-        default:
-            out_x = rx;
-            out_y = ry;
-            break;
+static lv_display_rotation_t _imu_orientation_to_rotation(int orientation) {
+    switch (orientation & 0x3) {
+        case 1:  return LV_DISPLAY_ROTATION_90;
+        case 2:  return LV_DISPLAY_ROTATION_180;
+        case 3:  return LV_DISPLAY_ROTATION_270;
+        default: return LV_DISPLAY_ROTATION_0;
     }
 }
 
 // —— Touch read callback ——
 static void _touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     (void)indev;
-    uint16_t raw_x = 0, raw_y = 0;
-    if (hal::touch_read(raw_x, raw_y)) {
-        int32_t x = 0, y = 0;
-        _apply_rotation(raw_x, raw_y, x, y);
+    uint16_t x = 0, y = 0;
+    if (hal::touch_read(x, y)) {
         data->point.x = x;
         data->point.y = y;
         data->state   = LV_INDEV_STATE_PRESSED;
         static uint32_t _last_log = 0;
         if (millis() - _last_log > 200) {
-            Serial.printf("[TOUCH] x=%d y=%d (raw=%d,%d)\n", x, y, raw_x, raw_y);
+            const hal::TouchFrame& frame = hal::touch_frame();
+            Serial.printf("[TOUCH] x=%d y=%d (raw=%d,%d)\n",
+                          x, y, frame.points[0].raw_x, frame.points[0].raw_y);
             _last_log = millis();
         }
     } else {
@@ -106,9 +71,8 @@ static void _touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
 static void task_ui_lvgl(void*) {
     ui::dispatch_init();
 
-    // LVGL9 : l'indev DOIT être rattaché au display via lv_indev_set_display()
-    // pour que LVGL applique la transformation inverse sur les coords touch.
-    // _touch_read_cb applique la transformation directe -> annulation -> hit correct.
+    // LVGL9 : l'indev DOIT être rattaché au display pour générer les événements.
+    // La rotation LVGL interne reste à 0 ; le mapping tactile est fait ci-dessus.
     lv_indev_t* touch_indev = lv_indev_create();
     lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(touch_indev, _touch_read_cb);
@@ -119,6 +83,7 @@ static void task_ui_lvgl(void*) {
     ui_launcher_init();
     Serial.println("[UI] LVGL task ready");
     uint32_t last_status_tick = 0;
+    uint32_t last_imu_tick = 0;
     for (;;) {
         ui::dispatch_flush();
         lv_timer_handler();
@@ -130,6 +95,18 @@ static void task_ui_lvgl(void*) {
         if (now - last_status_tick >= 1000) {
             last_status_tick = now;
             ui_status_bar_tick();
+        }
+        if (now - last_imu_tick >= 250) {
+            last_imu_tick = now;
+            if (hal::display_get_auto_rotation_enabled()) {
+                hal_imu_tick();
+            }
+            if (hal::display_get_auto_rotation_enabled() && hal_imu_changed()) {
+                const int ori = hal_imu_orientation();
+                hal::display_set_rotation(_imu_orientation_to_rotation(ori));
+                Serial.printf("[IMU] orientation=%d -> ui_rotation=%d\n",
+                              ori, (int)_imu_orientation_to_rotation(ori));
+            }
         }
         ui_launcher_btn_tick();
         vTaskDelay(pdMS_TO_TICKS(5));

@@ -16,6 +16,8 @@ namespace hal {
     lv_display_t*         display_get();
     lv_display_rotation_t display_get_rotation();
     void                  display_set_rotation(lv_display_rotation_t rot);
+    void                  display_set_auto_rotation_enabled(bool enabled);
+    bool                  display_get_auto_rotation_enabled();
     void                  display_set_brightness(uint8_t pct);
     void                  display_sleep();
     void                  display_wakeup();

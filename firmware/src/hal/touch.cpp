@@ -4,12 +4,12 @@
 // IMPORTANT : setPins() configure RST/INT pour SensorLib ; begin()
 // garde SDA/SCL à -1 car Wire est déjà initialisé ailleurs.
 //
-// ROTATION : ce fichier retourne TOUJOURS les coordonnées brutes
-// du capteur CST9220. Il ne connaît pas la rotation courante.
-// C'est LVGL qui transforme les coords touch via lv_display_set_rotation().
+// ROTATION : raw_x/raw_y conservent les valeurs capteur CST9220.
+// x/y sont mappés dans le repère LVGL visible selon la rotation de flush.
 // Ne jamais ajouter de swap/mirror ici — cela casserait la rotation auto.
 // ============================================================
 #include "touch.h"
+#include "display.h"
 #include "../../include/pins.h"
 #include <Arduino.h>
 #include <Wire.h>
@@ -34,13 +34,36 @@ static int32_t _clamp_i32(int32_t v, int32_t lo, int32_t hi) {
     return v;
 }
 
-// Retourne les coordonnées brutes du CST9220, clampées dans les bornes.
-// LVGL applique la transformation de rotation en interne via
-// lv_display_set_rotation() — aucun swap/mirror ne doit être fait ici.
+// Convertit le point capteur physique vers le repère LVGL visible.
 static void _map_touch_to_lvgl(int32_t sensor_x, int32_t sensor_y,
                                uint16_t& x, uint16_t& y) {
-    x = (uint16_t)_clamp_i32(sensor_x, 0, LCD_WIDTH  - 1);
-    y = (uint16_t)_clamp_i32(sensor_y, 0, LCD_HEIGHT - 1);
+    const int32_t rx = _clamp_i32(sensor_x, 0, LCD_WIDTH - 1);
+    const int32_t ry = _clamp_i32(sensor_y, 0, LCD_HEIGHT - 1);
+    int32_t lx = rx;
+    int32_t ly = ry;
+
+    switch (hal::display_get_rotation()) {
+        case LV_DISPLAY_ROTATION_90:
+            lx = (LCD_HEIGHT - 1) - ry;
+            ly = rx;
+            break;
+        case LV_DISPLAY_ROTATION_180:
+            lx = (LCD_WIDTH - 1) - rx;
+            ly = (LCD_HEIGHT - 1) - ry;
+            break;
+        case LV_DISPLAY_ROTATION_270:
+            lx = ry;
+            ly = (LCD_WIDTH - 1) - rx;
+            break;
+        case LV_DISPLAY_ROTATION_0:
+        default:
+            lx = rx;
+            ly = ry;
+            break;
+    }
+
+    x = (uint16_t)_clamp_i32(lx, 0, LCD_WIDTH - 1);
+    y = (uint16_t)_clamp_i32(ly, 0, LCD_HEIGHT - 1);
 }
 
 static void _clear_frame_points() {
@@ -65,7 +88,7 @@ bool hal::touch_init() {
         pinMode(PIN_TP_INT, INPUT_PULLUP);
         _drv.setMaxCoordinates(480, 480);
         attachInterrupt(digitalPinToInterrupt(PIN_TP_INT), _touch_irq_isr, FALLING);
-        // Pas de swap/mirror hardware — LVGL gère la rotation
+        // Pas de swap/mirror hardware — os_main.cpp gère le mapping visible.
         _drv.setSwapXY(false);
         _drv.setMirrorXY(false, false);
         _ok = true;

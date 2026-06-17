@@ -6,12 +6,10 @@
 // repere que le touch. Les marges boitier restent disponibles
 // uniquement comme safe area pour le layout.
 //
-// ROTATION : LV_DISPLAY_ROTATION_0 — premier test.
-// Si le rendu est encore de 90°, tester ROTATION_90 puis ROTATION_180.
-// L'indev touch applique la transformation inverse en temps reel
-// via display_get_rotation() — voir os_main.cpp _touch_read_cb.
-// Pour la rotation auto (QMI8658), appeler display_set_rotation()
-// qui met à jour le display LVGL ET invalide l'indev automatiquement.
+// ROTATION :
+// - le CO5300 ne sait pas faire une vraie rotation 90/270
+// - LCD_ROTATION est donc appliquée ici, dans le flush logiciel
+// - le tactile applique l'inverse de cette rotation dans os_main.cpp
 // ============================================================
 #include "display.h"
 #include "drivers/co5300.h"
@@ -27,25 +25,91 @@
 
 static uint8_t*      _buf1  = nullptr;
 static uint8_t*      _buf2  = nullptr;
+static uint16_t*     _rot_buf = nullptr;
 static lv_display_t* _disp  = nullptr;
+static lv_display_rotation_t _ui_rot = LV_DISPLAY_ROTATION_0;
+static bool _auto_rotation_enabled = true;
 
-// Flush callback : repere 1:1 entre LVGL et la dalle physique
+static lv_display_rotation_t _compose_rotation(uint8_t a, uint8_t b) {
+    return (lv_display_rotation_t)((a + b) & 0x3);
+}
+
+static void _flush_rotated(const lv_area_t* area, const uint16_t* src,
+                           lv_display_rotation_t rot) {
+    const int32_t src_w = area->x2 - area->x1 + 1;
+    const int32_t src_h = area->y2 - area->y1 + 1;
+    int32_t dst_x1 = area->x1;
+    int32_t dst_y1 = area->y1;
+    int32_t dst_w = src_w;
+    int32_t dst_h = src_h;
+
+    if (rot == LV_DISPLAY_ROTATION_0) {
+        co5300::flush(dst_x1, dst_y1, area->x2, area->y2, src);
+        return;
+    }
+
+    if (!_rot_buf) return;
+
+    switch (rot) {
+        case LV_DISPLAY_ROTATION_90:
+            dst_x1 = area->y1;
+            dst_y1 = LCD_WIDTH - 1 - area->x2;
+            dst_w = src_h;
+            dst_h = src_w;
+            for (int32_t sy = 0; sy < src_h; ++sy) {
+                for (int32_t sx = 0; sx < src_w; ++sx) {
+                    const int32_t dx = sy;
+                    const int32_t dy = src_w - 1 - sx;
+                    _rot_buf[dy * dst_w + dx] = src[sy * src_w + sx];
+                }
+            }
+            break;
+        case LV_DISPLAY_ROTATION_180:
+            dst_x1 = LCD_WIDTH - 1 - area->x2;
+            dst_y1 = LCD_HEIGHT - 1 - area->y2;
+            dst_w = src_w;
+            dst_h = src_h;
+            for (int32_t sy = 0; sy < src_h; ++sy) {
+                for (int32_t sx = 0; sx < src_w; ++sx) {
+                    const int32_t dx = src_w - 1 - sx;
+                    const int32_t dy = src_h - 1 - sy;
+                    _rot_buf[dy * dst_w + dx] = src[sy * src_w + sx];
+                }
+            }
+            break;
+        case LV_DISPLAY_ROTATION_270:
+            dst_x1 = LCD_HEIGHT - 1 - area->y2;
+            dst_y1 = area->x1;
+            dst_w = src_h;
+            dst_h = src_w;
+            for (int32_t sy = 0; sy < src_h; ++sy) {
+                for (int32_t sx = 0; sx < src_w; ++sx) {
+                    const int32_t dx = src_h - 1 - sy;
+                    const int32_t dy = sx;
+                    _rot_buf[dy * dst_w + dx] = src[sy * src_w + sx];
+                }
+            }
+            break;
+        default:
+            return;
+    }
+
+    co5300::flush(dst_x1, dst_y1, dst_x1 + dst_w - 1, dst_y1 + dst_h - 1,
+                  _rot_buf);
+}
+
+// Flush callback : rotation logicielle du buffer LVGL vers la dalle physique.
 static void _flush_cb(lv_display_t* disp, const lv_area_t* area,
                       uint8_t* px_map) {
-    co5300::flush(
-        area->x1,
-        area->y1,
-        area->x2,
-        area->y2,
-        (const uint16_t*)px_map
-    );
+    (void)disp;
+    _flush_rotated(area, (const uint16_t*)px_map, hal::display_get_rotation());
     lv_display_flush_ready(disp);
 }
 
 namespace hal {
 
 void display_init() {
-    // 1. Init hardware CO5300 en 480x480 physique (rotation=0 hardware)
+    // 1. Init hardware CO5300 en 480x480 physique, sans rotation matérielle.
     co5300::init();
 
     // 2. Alloue buffers (PSRAM preferee, sinon RAM interne)
@@ -56,7 +120,11 @@ void display_init() {
         _buf1 = (uint8_t*)heap_caps_malloc(BUF_BYTES, MALLOC_CAP_INTERNAL);
         _buf2 = (uint8_t*)heap_caps_malloc(BUF_BYTES, MALLOC_CAP_INTERNAL);
     }
-    if (!_buf1 || !_buf2) {
+    _rot_buf = (uint16_t*)heap_caps_malloc(BUF_BYTES, MALLOC_CAP_SPIRAM);
+    if (!_rot_buf) {
+        _rot_buf = (uint16_t*)heap_caps_malloc(BUF_BYTES, MALLOC_CAP_INTERNAL);
+    }
+    if (!_buf1 || !_buf2 || !_rot_buf) {
         Serial.println("[HAL] display_init: alloc FAILED");
         return;
     }
@@ -67,10 +135,11 @@ void display_init() {
     lv_display_set_buffers(_disp, _buf1, _buf2, BUF_BYTES,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
-    // TEST ROTATION_0 — si rendu 90° de trop -> tester ROTATION_90 puis ROTATION_180
+    // LVGL reste en rotation 0 : la rotation est faite dans _flush_cb.
     lv_display_set_rotation(_disp, LV_DISPLAY_ROTATION_0);
 
-    Serial.printf("[CO5300] init OK — rotation=0 (test)\n");
+    Serial.printf("[HAL] LVGL init OK — ui_rotation=%d flush_rotation=%d\n",
+                  (int)_ui_rot, (int)display_get_rotation());
     Serial.printf("[HAL] display_init OK — phys=%dx%d lv=%dx%d buf=%u B x2\n",
                   LCD_WIDTH_PHYS, LCD_HEIGHT_PHYS,
                   LCD_WIDTH, LCD_HEIGHT, (unsigned)BUF_BYTES);
@@ -79,14 +148,25 @@ void display_init() {
 lv_display_t* display_get() { return _disp; }
 
 lv_display_rotation_t display_get_rotation() {
-    if (!_disp) return LV_DISPLAY_ROTATION_0;
-    return lv_display_get_rotation(_disp);
+    return _compose_rotation((uint8_t)LCD_ROTATION, (uint8_t)_ui_rot);
 }
 
 void display_set_rotation(lv_display_rotation_t rot) {
     if (!_disp) return;
-    lv_display_set_rotation(_disp, rot);
-    Serial.printf("[HAL] display_set_rotation -> %d\n", (int)rot);
+    _ui_rot = rot;
+    lv_display_set_rotation(_disp, LV_DISPLAY_ROTATION_0);
+    lv_obj_invalidate(lv_screen_active());
+    Serial.printf("[HAL] display_set_rotation -> ui=%d flush=%d\n",
+                  (int)_ui_rot, (int)display_get_rotation());
+}
+
+void display_set_auto_rotation_enabled(bool enabled) {
+    _auto_rotation_enabled = enabled;
+    Serial.printf("[HAL] auto_rotation=%d\n", enabled ? 1 : 0);
+}
+
+bool display_get_auto_rotation_enabled() {
+    return _auto_rotation_enabled;
 }
 
 void display_set_brightness(uint8_t pct) {
