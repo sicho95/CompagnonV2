@@ -1,9 +1,0 @@
-# Secrets
-src/config/secrets.h
-
-# PlatformIO
-.pio/
-.vscode/
-.idea/
-__pycache__/
-*.pyc
