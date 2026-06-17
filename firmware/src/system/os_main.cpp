@@ -39,11 +39,12 @@ static TaskHandle_t _h_ble   = nullptr;
 static TaskHandle_t _h_net   = nullptr;
 
 static lv_display_rotation_t _imu_orientation_to_rotation(int orientation) {
+    // Le repère QMI8658 est à 180 degres du repère visuel du boîtier.
     switch (orientation & 0x3) {
-        case 1:  return LV_DISPLAY_ROTATION_270;
-        case 2:  return LV_DISPLAY_ROTATION_180;
-        case 3:  return LV_DISPLAY_ROTATION_90;
-        default: return LV_DISPLAY_ROTATION_0;
+        case 1:  return LV_DISPLAY_ROTATION_90;
+        case 2:  return LV_DISPLAY_ROTATION_0;
+        case 3:  return LV_DISPLAY_ROTATION_270;
+        default: return LV_DISPLAY_ROTATION_180;
     }
 }
 
