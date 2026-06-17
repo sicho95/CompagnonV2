@@ -34,6 +34,12 @@ static lv_display_rotation_t _compose_rotation(uint8_t a, uint8_t b) {
     return (lv_display_rotation_t)((a + b) & 0x3);
 }
 
+static lv_display_rotation_t _panel_mount_rotation() {
+    // LCD_ROTATION vient de l'ancien réglage Arduino_GFX/MADCTL.
+    // En rotation logicielle, le sens est inverse.
+    return (lv_display_rotation_t)((4 - (LCD_ROTATION & 0x3)) & 0x3);
+}
+
 static void _flush_rotated(const lv_area_t* area, const uint16_t* src,
                            lv_display_rotation_t rot) {
     const int32_t src_w = area->x2 - area->x1 + 1;
@@ -138,8 +144,9 @@ void display_init() {
     // LVGL reste en rotation 0 : la rotation est faite dans _flush_cb.
     lv_display_set_rotation(_disp, LV_DISPLAY_ROTATION_0);
 
-    Serial.printf("[HAL] LVGL init OK — ui_rotation=%d flush_rotation=%d\n",
-                  (int)_ui_rot, (int)display_get_rotation());
+    Serial.printf("[HAL] LVGL init OK — mount_rotation=%d ui_rotation=%d flush_rotation=%d\n",
+                  (int)_panel_mount_rotation(), (int)_ui_rot,
+                  (int)display_get_rotation());
     Serial.printf("[HAL] display_init OK — phys=%dx%d lv=%dx%d buf=%u B x2\n",
                   LCD_WIDTH_PHYS, LCD_HEIGHT_PHYS,
                   LCD_WIDTH, LCD_HEIGHT, (unsigned)BUF_BYTES);
@@ -148,14 +155,18 @@ void display_init() {
 lv_display_t* display_get() { return _disp; }
 
 lv_display_rotation_t display_get_rotation() {
-    return _compose_rotation((uint8_t)LCD_ROTATION, (uint8_t)_ui_rot);
+    return _compose_rotation((uint8_t)_panel_mount_rotation(), (uint8_t)_ui_rot);
 }
 
 void display_set_rotation(lv_display_rotation_t rot) {
     if (!_disp) return;
+    if (_ui_rot == rot) return;
     _ui_rot = rot;
     lv_display_set_rotation(_disp, LV_DISPLAY_ROTATION_0);
+    // Rotation de flush: il faut redessiner toute la scène dans le nouveau repère.
     lv_obj_invalidate(lv_screen_active());
+    lv_obj_invalidate(lv_layer_top());
+    lv_refr_now(_disp);
     Serial.printf("[HAL] display_set_rotation -> ui=%d flush=%d\n",
                   (int)_ui_rot, (int)display_get_rotation());
 }

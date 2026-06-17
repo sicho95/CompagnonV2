@@ -14,8 +14,15 @@
 #endif
 
 static int  _orientation      = 0;
-static int  _prev_orientation = -1;
+static int  _candidate_orientation = -1;
+static int  _candidate_count       = 0;
 static bool _changed          = false;
+
+namespace {
+constexpr float IMU_MIN_AXIS_G = 0.45f;
+constexpr float IMU_DOMINANCE_G = 0.16f;
+constexpr int   IMU_STABLE_SAMPLES = 4;
+}
 
 void hal_imu_init() {
 #if __has_include(<SensorQMI8658.hpp>)
@@ -44,15 +51,32 @@ void hal_imu_tick() {
     if (!_qmi_ok || !_qmi) return;
     float ax, ay, az;
     if (!_qmi->getAccelerometer(ax, ay, az)) return;
+
+    const float abs_x = fabsf(ax);
+    const float abs_y = fabsf(ay);
+    if (abs_x < IMU_MIN_AXIS_G && abs_y < IMU_MIN_AXIS_G) return;
+    if (fabsf(abs_x - abs_y) < IMU_DOMINANCE_G) return;
+
     int ori;
-    if (fabsf(ax) > fabsf(ay)) {
+    if (abs_x > abs_y) {
         ori = (ax > 0) ? 3 : 1;
     } else {
         ori = (ay < 0) ? 0 : 2;
     }
-    if (ori != _prev_orientation) {
-        _prev_orientation = ori;
-        _orientation      = ori;
+
+    if (ori != _candidate_orientation) {
+        _candidate_orientation = ori;
+        _candidate_count = 1;
+        return;
+    }
+
+    if (_candidate_count < IMU_STABLE_SAMPLES) {
+        _candidate_count++;
+        return;
+    }
+
+    if (ori != _orientation) {
+        _orientation = ori;
         _changed          = true;
     }
 #endif

@@ -40,9 +40,9 @@ static TaskHandle_t _h_net   = nullptr;
 
 static lv_display_rotation_t _imu_orientation_to_rotation(int orientation) {
     switch (orientation & 0x3) {
-        case 1:  return LV_DISPLAY_ROTATION_90;
+        case 1:  return LV_DISPLAY_ROTATION_270;
         case 2:  return LV_DISPLAY_ROTATION_180;
-        case 3:  return LV_DISPLAY_ROTATION_270;
+        case 3:  return LV_DISPLAY_ROTATION_90;
         default: return LV_DISPLAY_ROTATION_0;
     }
 }
@@ -96,7 +96,7 @@ static void task_ui_lvgl(void*) {
             last_status_tick = now;
             ui_status_bar_tick();
         }
-        if (now - last_imu_tick >= 250) {
+        if (now - last_imu_tick >= 200) {
             last_imu_tick = now;
             if (hal::display_get_auto_rotation_enabled()) {
                 hal_imu_tick();
