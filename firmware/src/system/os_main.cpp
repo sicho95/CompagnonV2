@@ -78,6 +78,7 @@ static void task_ui_lvgl(void*) {
     lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(touch_indev, _touch_read_cb);
     lv_indev_set_display(touch_indev, lv_display_get_default());
+    lv_timer_pause(lv_indev_get_read_timer(touch_indev));
     Serial.println("[TOUCH] LVGL probe armed");
 
     ui_status_bar_init();
@@ -87,10 +88,11 @@ static void task_ui_lvgl(void*) {
     uint32_t last_imu_tick = 0;
     for (;;) {
         ui::dispatch_flush();
-        lv_timer_handler();
+        lv_indev_read(touch_indev);
         ui_status_bar_touch_tick();
         ui_launcher_touch_tick();
         ui::notification_tick();
+        lv_timer_handler();
         uint32_t now = millis();
         if (now - last_status_tick >= 1000) {
             last_status_tick = now;

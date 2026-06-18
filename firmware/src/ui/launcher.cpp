@@ -348,6 +348,7 @@ static void _build_page(lv_obj_t* parent, int page) {
         lv_obj_set_flex_flow(col_cont, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(col_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(col_cont, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(col_cont, LV_OBJ_FLAG_EVENT_BUBBLE);
 
         lv_obj_t* well = _make_icon_well(col_cont, desc.icon);
         _icon_wells[page][i] = well;
