@@ -28,6 +28,7 @@ Architecture validée:
 - l'indev LVGL est rattaché au display, son timer interne est mis en pause, puis lu explicitement une seule fois par boucle UI
 - `app_launch()` et `app_close_current()` passent toujours par une transition atomique sur le thread UI
 - quand `launch/close` part d'un callback LVGL, la transition est différée via `lv_async_call()`
+- aucune I/O réseau bloquante d'application ne s'exécute dans `init()` ou `onResume()` sur le thread UI
 - QMI8658 ajoute une rotation UI dynamique, avec offset de `180°` entre son repère et le repère visuel du boîtier
 - `display_set_rotation()` invalide l'écran actif et la couche top, puis force `lv_refr_now()`
 
@@ -224,6 +225,18 @@ Corollaire important pour ce projet:
 - `_current_app` n'est changé qu'au moment de la transition UI effective
 
 Cette règle évite le cas où une app serait marquée fermée logiquement, mais resterait visuellement affichée si la queue UI échouait.
+
+Autre règle critique:
+
+- `init()` et `onResume()` ne doivent pas faire d'HTTP bloquant, DNS, TLS, ni de lecture lente
+- si une app doit charger des données réseau, elle le fait dans une tâche de fond
+- le résultat revient ensuite sur LVGL via `ui::dispatch_post(...)`
+
+Exemple validé dans ce projet:
+
+- `Meteo` ne fait plus son `HTTPClient::GET()` dans `onResume()`
+- le fetch tourne dans une tâche FreeRTOS dédiée avec timeout explicite
+- l'UI reste donc réactive: rotation IMU, bouton `X`, boutons physiques, retour launcher
 
 ## I2C partagé: ce qu'il faut faire
 
@@ -462,6 +475,7 @@ Commande de compilation utilisée côté CLI:
 16. Ne jamais réduire LVGL à `450x460`: garder `480x480` et appliquer la safe area dans le layout.
 17. Le bouton `X` d'une app doit être créé au premier plan, après le contenu principal.
 18. Les transitions `launch/close` doivent rester atomiques sur le thread UI.
+19. Aucune app ne doit faire d'I/O réseau bloquante dans `init()` ou `onResume()`.
 
 ## Ce qu'il reste à faire plus tard
 

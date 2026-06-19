@@ -11,15 +11,21 @@
 #include "../hal/display.h"
 #include "../ui/app_header.h"
 #include "../ui/status_bar.h"
+#include "../ui/ui_dispatch.h"
 #include <lvgl.h>
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <memory>
 
 #define METEO_INSEE  "92050"
 #define METEO_URL    "https://api.meteo-concept.com/api/forecast/daily?token=%s&insee=" METEO_INSEE
 #define FORECAST_DAYS 4
+#define METEO_HTTP_TIMEOUT_MS 5000
 
 static lv_obj_t* _screen      = nullptr;
 static lv_obj_t* _temp_big    = nullptr;
@@ -27,6 +33,129 @@ static lv_obj_t* _desc_lbl    = nullptr;
 static lv_obj_t* _day_lbl[FORECAST_DAYS]  = {};
 static lv_obj_t* _tmin_lbl[FORECAST_DAYS] = {};
 static lv_obj_t* _tmax_lbl[FORECAST_DAYS] = {};
+static uint32_t  _fetch_gen   = 0;
+
+static const char* _weather_label(int code);
+
+namespace {
+
+struct MeteoFetchCtx {
+    uint32_t gen;
+};
+
+struct MeteoFetchResult {
+    uint32_t gen = 0;
+    bool ok = false;
+    char temp[40] = "--°C";
+    char desc[96] = "Chargement...";
+    char hi[FORECAST_DAYS][12] = {};
+    char lo[FORECAST_DAYS][12] = {};
+};
+
+static void _apply_fetch_result(MeteoFetchResult* result) {
+    if (!result) return;
+    std::unique_ptr<MeteoFetchResult> holder(result);
+    if (holder->gen != _fetch_gen) return;
+    if (!_temp_big || !_desc_lbl) return;
+
+    lv_label_set_text(_temp_big, holder->temp);
+    lv_label_set_text(_desc_lbl, holder->desc);
+    for (int i = 0; i < FORECAST_DAYS; ++i) {
+        if (_tmax_lbl[i] && holder->hi[i][0]) lv_label_set_text(_tmax_lbl[i], holder->hi[i]);
+        if (_tmin_lbl[i] && holder->lo[i][0]) lv_label_set_text(_tmin_lbl[i], holder->lo[i]);
+    }
+    if (_screen == lv_scr_act()) {
+        lv_obj_invalidate(lv_scr_act());
+        hal::display_force_refresh();
+    }
+}
+
+static void _meteo_fetch_task(void* user_data) {
+    std::unique_ptr<MeteoFetchCtx> ctx(static_cast<MeteoFetchCtx*>(user_data));
+    if (!ctx) {
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    auto* result = new MeteoFetchResult();
+    result->gen = ctx->gen;
+
+    if (WiFi.status() != WL_CONNECTED) {
+        strlcpy(result->desc, "Pas de WiFi", sizeof(result->desc));
+        ui::dispatch_post([result]() { _apply_fetch_result(result); });
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    char token[64] = {};
+    if (!nvs_get_api_key(NVS_KEY_METEO, token, sizeof(token))) {
+        strlcpy(result->desc, "Clé manquante", sizeof(result->desc));
+        ui::dispatch_post([result]() { _apply_fetch_result(result); });
+        Serial.println("[Meteo] NVS_KEY_METEO non defini");
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    char url[200];
+    snprintf(url, sizeof(url), METEO_URL, token);
+
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.begin(client, url);
+    http.setTimeout(METEO_HTTP_TIMEOUT_MS);
+    http.addHeader("Accept", "application/json");
+    int code = http.GET();
+    if (code != 200) {
+        snprintf(result->desc, sizeof(result->desc), "HTTP %d", code);
+        Serial.printf("[Meteo] HTTP %d\n", code);
+        http.end();
+        ui::dispatch_post([result]() { _apply_fetch_result(result); });
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, http.getStream());
+    http.end();
+    if (err) {
+        strlcpy(result->desc, "Erreur JSON", sizeof(result->desc));
+        Serial.printf("[Meteo] JSON err: %s\n", err.c_str());
+        ui::dispatch_post([result]() { _apply_fetch_result(result); });
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    JsonArray forecast = doc["forecast"];
+    if (forecast.isNull() || forecast.size() == 0) {
+        strlcpy(result->desc, "Données vides", sizeof(result->desc));
+        ui::dispatch_post([result]() { _apply_fetch_result(result); });
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    JsonObject d0  = forecast[0];
+    int tmin0      = d0["tmin"] | 0;
+    int tmax0      = d0["tmax"] | 0;
+    int weather0   = d0["weather"] | 0;
+    snprintf(result->temp, sizeof(result->temp), "%d°C", tmax0);
+    snprintf(result->desc, sizeof(result->desc), "%s\nMin %d° / Max %d°",
+             _weather_label(weather0), tmin0, tmax0);
+
+    for (int i = 0; i < FORECAST_DAYS && i < (int)forecast.size(); i++) {
+        JsonObject d = forecast[i];
+        int tmin = d["tmin"] | 0;
+        int tmax = d["tmax"] | 0;
+        snprintf(result->hi[i], sizeof(result->hi[i]), "%d°", tmax);
+        snprintf(result->lo[i], sizeof(result->lo[i]), "%d°", tmin);
+    }
+    result->ok = true;
+    Serial.println("[Meteo] donnees Meteo-Concept OK");
+    ui::dispatch_post([result]() { _apply_fetch_result(result); });
+    vTaskDelete(nullptr);
+}
+
+} // namespace
 
 // Codes weather Météo-Concept → libellé court (UTF-8 natif)
 static const char* _weather_label(int code) {
@@ -149,6 +278,8 @@ void AppMeteo::onResume() {
     ui_status_bar_raise();
     lv_obj_invalidate(lv_scr_act());
     hal::display_force_refresh();
+    if (_desc_lbl) lv_label_set_text(_desc_lbl, "Chargement...");
+    if (_temp_big) lv_label_set_text(_temp_big, "--°C");
     _fetch();
 }
 
@@ -156,70 +287,13 @@ void AppMeteo::update() {}
 void AppMeteo::onPause() {}
 
 void AppMeteo::_fetch() {
-    if (WiFi.status() != WL_CONNECTED) {
-        lv_label_set_text(_desc_lbl, "Pas de WiFi");
-        return;
+    ++_fetch_gen;
+    auto* ctx = new MeteoFetchCtx{_fetch_gen};
+    BaseType_t ok = xTaskCreatePinnedToCore(_meteo_fetch_task, "meteo_fetch",
+                                            8192, ctx, 1, nullptr, 0);
+    if (ok != pdPASS) {
+        delete ctx;
+        if (_desc_lbl) lv_label_set_text(_desc_lbl, "Erreur tâche");
+        Serial.println("[Meteo] fetch task create FAILED");
     }
-    char token[64] = {};
-    if (!nvs_get_api_key(NVS_KEY_METEO, token, sizeof(token))) {
-        lv_label_set_text(_desc_lbl, "Clé manquante");
-        Serial.println("[Meteo] NVS_KEY_METEO non defini");
-        return;
-    }
-    char url[200];
-    snprintf(url, sizeof(url), METEO_URL, token);
-
-    HTTPClient http;
-    http.begin(url);
-    http.addHeader("Accept", "application/json");
-    int code = http.GET();
-    if (code != 200) {
-        Serial.printf("[Meteo] HTTP %d\n", code);
-        lv_label_set_text(_desc_lbl, "Erreur réseau");
-        http.end();
-        return;
-    }
-
-    // ArduinoJson v7 : JsonDocument (StaticJsonDocument déprécié)
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, http.getStream());
-    http.end();
-    if (err) {
-        Serial.printf("[Meteo] JSON err: %s\n", err.c_str());
-        lv_label_set_text(_desc_lbl, "Erreur JSON");
-        return;
-    }
-
-    JsonArray forecast = doc["forecast"];
-    if (forecast.isNull() || forecast.size() == 0) {
-        lv_label_set_text(_desc_lbl, "Données vides");
-        return;
-    }
-
-    JsonObject d0  = forecast[0];
-    int tmin0      = d0["tmin"] | 0;
-    int tmax0      = d0["tmax"] | 0;
-    int weather0   = d0["weather"] | 0;
-
-    // Utiliser des tableaux assez grands pour les caractères UTF-8 (é = 2 octets)
-    char buf[40];
-    snprintf(buf, sizeof(buf), "%d°C", tmax0);
-    lv_label_set_text(_temp_big, buf);
-
-    char desc[80];
-    snprintf(desc, sizeof(desc), "%s\nMin %d° / Max %d°",
-             _weather_label(weather0), tmin0, tmax0);
-    lv_label_set_text(_desc_lbl, desc);
-
-    for (int i = 0; i < FORECAST_DAYS && i < (int)forecast.size(); i++) {
-        JsonObject d  = forecast[i];
-        int tmin = d["tmin"] | 0;
-        int tmax = d["tmax"] | 0;
-        char hi[12], lo[12];
-        snprintf(hi, sizeof(hi), "%d°", tmax);
-        snprintf(lo, sizeof(lo), "%d°", tmin);
-        lv_label_set_text(_tmax_lbl[i], hi);
-        lv_label_set_text(_tmin_lbl[i], lo);
-    }
-    Serial.println("[Meteo] donnees Meteo-Concept OK");
 }
