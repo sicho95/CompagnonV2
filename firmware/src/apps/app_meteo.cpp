@@ -66,7 +66,6 @@ static void _apply_fetch_result(MeteoFetchResult* result) {
     }
     if (_screen == lv_scr_act()) {
         lv_obj_invalidate(lv_scr_act());
-        hal::display_force_refresh();
     }
 }
 
@@ -277,7 +276,6 @@ void AppMeteo::onResume() {
     lv_scr_load(_screen);
     ui_status_bar_raise();
     lv_obj_invalidate(lv_scr_act());
-    hal::display_force_refresh();
     if (_desc_lbl) lv_label_set_text(_desc_lbl, "Chargement...");
     if (_temp_big) lv_label_set_text(_temp_big, "--°C");
     _fetch();

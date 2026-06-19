@@ -113,7 +113,6 @@ void AppRadars::onResume() {
     lv_scr_load(_screen);
     ui_status_bar_raise();
     lv_obj_invalidate(lv_scr_act());
-    hal::display_force_refresh();
 }
 void AppRadars::update()  {}
 void AppRadars::onPause() {}

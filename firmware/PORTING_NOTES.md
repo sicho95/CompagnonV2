@@ -74,5 +74,6 @@ Résumé à respecter dans un nouveau projet:
 - timer interne indev mis en pause
 - `app_launch()` / `app_close_current()` sont sérialisés sur le thread UI
 - si l'action vient d'un callback LVGL, `launch/close` est différé via `lv_async_call()`
+- les transitions et `onResume()` ne doivent pas appeler `display_force_refresh()` / `lv_refr_now()`
 - aucune app ne fait d'HTTP bloquant dans `init()` / `onResume()`
 - QMI8658 filtré et converti avec offset de `180°`

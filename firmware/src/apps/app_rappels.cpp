@@ -99,7 +99,6 @@ void AppRappels::onResume() {
     lv_scr_load(_screen);
     ui_status_bar_raise();
     lv_obj_invalidate(lv_scr_act());
-    hal::display_force_refresh();
     Serial.printf("[Rappels] resume scr=%p active=%p\n", _screen, lv_scr_act());
 }
 
