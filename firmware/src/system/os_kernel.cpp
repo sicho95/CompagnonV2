@@ -126,6 +126,7 @@ bool app_launch(AppId id) {
         inst->onResume();
         lv_obj_invalidate(lv_screen_active());
         lv_obj_invalidate(lv_layer_top());
+        hal::display_request_refresh();
         Serial.printf("[KERNEL] app_launch %d -> screen requested\n", (int)id);
     })) {
         Serial.printf("[KERNEL] app_launch %d -> dispatch FAILED\n", (int)id);
@@ -149,6 +150,7 @@ void app_close_current() {
         ui_launcher_show();
         lv_obj_invalidate(lv_screen_active());
         lv_obj_invalidate(lv_layer_top());
+        hal::display_request_refresh();
         Serial.printf("[KERNEL] app_close_current %d -> launcher requested\n", (int)closing_id);
     })) {
         Serial.printf("[KERNEL] app_close_current %d -> dispatch FAILED\n",

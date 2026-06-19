@@ -29,6 +29,7 @@ static uint16_t*     _rot_buf = nullptr;
 static lv_display_t* _disp  = nullptr;
 static lv_display_rotation_t _ui_rot = LV_DISPLAY_ROTATION_0;
 static bool _auto_rotation_enabled = true;
+static volatile bool _refresh_requested = false;
 
 static lv_display_rotation_t _compose_rotation(uint8_t a, uint8_t b) {
     return (lv_display_rotation_t)((a + b) & 0x3);
@@ -192,6 +193,16 @@ void display_sleep() {
 void display_wakeup() {
     co5300::wakeup();
     Serial.println("[HAL] display_wakeup");
+}
+
+void display_request_refresh() {
+    _refresh_requested = true;
+}
+
+bool display_consume_refresh_request() {
+    if (!_refresh_requested) return false;
+    _refresh_requested = false;
+    return true;
 }
 
 void display_force_refresh() {

@@ -225,6 +225,8 @@ Corollaire important pour ce projet:
 - `_current_app` n'est changé qu'au moment de la transition UI effective
 - les transitions `launch/close`, `onResume()` et callbacks de données ne doivent pas appeler `display_force_refresh()` / `lv_refr_now()`
 - après un changement d'écran, on invalide les objets et on laisse le tick LVGL normal faire le redraw complet
+- si le panel doit être rafraîchi immédiatement après une transition, appeler `display_request_refresh()`
+- `task_ui_lvgl()` consomme cette demande au tour suivant, après `dispatch_flush()`, donc hors callback `lv_async_call()`
 
 Cette règle évite le cas où une app serait marquée fermée logiquement, mais resterait visuellement affichée si la queue UI échouait.
 Elle évite aussi le gel observé quand le launcher planifie sa finalisation puis qu'un refresh synchrone bloque la boucle UI avant l'exécution de cette finalisation.

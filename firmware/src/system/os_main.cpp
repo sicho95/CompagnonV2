@@ -88,6 +88,9 @@ static void task_ui_lvgl(void*) {
     uint32_t last_imu_tick = 0;
     for (;;) {
         ui::dispatch_flush();
+        if (hal::display_consume_refresh_request()) {
+            hal::display_force_refresh();
+        }
         lv_indev_read(touch_indev);
         lv_timer_handler();
         ui_status_bar_touch_tick();
