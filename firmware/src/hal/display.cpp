@@ -9,7 +9,7 @@
 // ROTATION :
 // - le CO5300 ne sait pas faire une vraie rotation 90/270
 // - LCD_ROTATION est donc appliquée ici, dans le flush logiciel
-// - le tactile applique l'inverse de cette rotation dans os_main.cpp
+// - touch.cpp mappe les points CST9220 dans le meme repere visible
 // ============================================================
 #include "display.h"
 #include "drivers/co5300.h"

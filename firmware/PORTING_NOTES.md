@@ -51,7 +51,23 @@
 ## Framework & LVGL
 
 - **Arduino 3.3.8** (arduino-esp32)
-- **LVGL 8.4.x**
+- **LVGL 9.x**
 - **ESP-IDF sous-jacent** : 5.1.x (embarqué dans arduino-esp32 3.3.8)
 - Board : `esp32s3dev` ou profil Waveshare AMOLED 2.16
 - Partition table : `huge_app.csv` (recommandé) ou custom avec OTA + FATFS
+
+## Point de portage critique: CO5300 + CST9220 + QMI8658
+
+Ne pas recopier une ancienne stratégie basée sur `Arduino_CO5300::setRotation(LCD_ROTATION)`, `setSwapXY(true)` ou une zone LVGL réduite `440x460`. L'état validé de ce firmware est documenté dans [WAVESHARE_2_16_BRINGUP.md](/Users/damien/Documents/Arduino/CompagnonV2/WAVESHARE_2_16_BRINGUP.md).
+
+Résumé à respecter dans un nouveau projet:
+
+- CO5300 en `setRotation(0)`
+- `LCD_ROTATION` utilisé comme orientation de montage seulement
+- rotation 90/270 faite dans le `flush_cb`
+- LVGL en plein `480x480`
+- CST9220 sans swap/mirror SensorLib
+- `touch.cpp` mappe les coordonnées selon `display_get_rotation()`
+- une seule lecture indev explicite par boucle UI
+- timer interne indev mis en pause
+- QMI8658 filtré et converti avec offset de `180°`

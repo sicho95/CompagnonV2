@@ -10,34 +10,72 @@ Ce document capitalise sur le travail de mise au point réalisé dans ce firmwar
 
 L'objectif est de garder une base réutilisable pour les prochains projets sur cette carte.
 
+## Synthèse validée juin 2026
+
+Le point critique de cette carte est que le CO5300 via `Arduino_GFX` ne fait pas une vraie rotation 90/270. `Arduino_CO5300::setRotation()` ne fait que des flips MADCTL. Il ne faut donc pas compter sur la rotation matérielle pour remettre l'UI droite.
+
+Architecture validée:
+
+- écran CO5300 initialisé en rotation matérielle `0`
+- LVGL déclaré en plein `480x480`
+- `LCD_ROTATION = 3` conservé comme orientation de montage historique
+- orientation de montage convertie en rotation logicielle inverse dans `display.cpp`
+- `flush_cb` tourne les pixels avant `draw16bitRGBBitmap()`
+- CST9220 lu brut via `SensorLib`, sans `swapXY` ni `mirrorXY`
+- `touch.cpp` mappe `raw_x/raw_y` vers `x/y` dans le repère LVGL visible selon `display_get_rotation()`
+- LVGL reste en rotation interne `0` pour éviter une seconde transformation automatique
+- l'indev LVGL est rattaché au display, son timer interne est mis en pause, puis lu explicitement une seule fois par boucle UI
+- QMI8658 ajoute une rotation UI dynamique, avec offset de `180°` entre son repère et le repère visuel du boîtier
+- `display_set_rotation()` invalide l'écran actif et la couche top, puis force `lv_refr_now()`
+
+Logs attendus au boot validé:
+
+```text
+[CO5300] init OK — hw_rotation=0 (software rotation=3)
+[HAL] LVGL init OK — mount_rotation=1 ui_rotation=0 flush_rotation=1
+[TOUCH] CST9220 OK — CST9220 (RST=40 INT=11 irq=1)
+[TOUCH] LVGL probe armed
+```
+
+Logs attendus lors d'un tap valide:
+
+```text
+[TOUCH] sensor=138,256 count=1 -> lv=223,138 int=0
+[TOUCH] x=223 y=138 (raw=138,256)
+[UI] launcher sel page=0 slot=1 idx=1
+[UI] launch app 4 (touch)
+```
+
 ## Etat validé
 
 Les points suivants fonctionnent ensemble dans ce projet:
 
-- affichage LVGL sur la zone utile de l'écran
-- orientation écran correcte avec `rotation=3` côté CO5300
+- affichage LVGL plein écran `480x480`
+- orientation écran correcte au boot via rotation logicielle de flush
+- rotation auto QMI8658 dans le bon sens
 - status bar LVGL stable
 - launcher paginé avec navigation boutons
 - fermeture d'app et retour launcher
-- tactile fonctionnel dans LVGL
+- tactile fonctionnel dans LVGL et aligné avec la rotation affichée
 
 Fichiers de référence:
 
 - [src/hal/display.cpp](/Users/damien/Documents/Arduino/CompagnonV2/src/hal/display.cpp)
 - [src/hal/touch.cpp](/Users/damien/Documents/Arduino/CompagnonV2/src/hal/touch.cpp)
+- [src/hal/imu.cpp](/Users/damien/Documents/Arduino/CompagnonV2/src/hal/imu.cpp)
 - [src/system/os_main.cpp](/Users/damien/Documents/Arduino/CompagnonV2/src/system/os_main.cpp)
 - [src/ui/launcher.cpp](/Users/damien/Documents/Arduino/CompagnonV2/src/ui/launcher.cpp)
 - [include/pins.h](/Users/damien/Documents/Arduino/CompagnonV2/include/pins.h)
 
 ## Géométrie écran
 
-La carte annonce un écran physique `480x480`, mais la zone réellement visible est masquée par le boîtier.
+La carte annonce un écran physique `480x480`. Pour garder un repère identique entre dalle, touch et LVGL, le display LVGL est aussi déclaré en `480x480`.
 
 Configuration retenue:
 
 - physique: `480x480`
-- marges boîtier: `20 px` gauche/droite, `10 px` haut/bas
-- zone utile LVGL: `440x460`
+- logique LVGL: `480x480`
+- marges boîtier: disponibles comme safe area layout seulement
 
 Définition utilisée:
 
@@ -45,39 +83,78 @@ Définition utilisée:
 - `LCD_HEIGHT_PHYS = 480`
 - `LCD_MARGIN_H = 20`
 - `LCD_MARGIN_V = 10`
-- `LCD_WIDTH = 440`
-- `LCD_HEIGHT = 460`
+- `LCD_WIDTH = LCD_WIDTH_PHYS`
+- `LCD_HEIGHT = LCD_HEIGHT_PHYS`
+- `LCD_SAFE_WIDTH = 440`
+- `LCD_SAFE_HEIGHT = 460`
 
 Conséquence:
 
 - le driver écran est initialisé en `480x480`
-- LVGL est enregistré en `440x460`
-- le flush ajoute l'offset boîtier avant envoi au CO5300
+- LVGL est enregistré en `480x480`
+- le touch CST9220 reste dans le même repère brut `480x480`
+- les marges ne doivent pas être soustraites dans le HAL tactile
 
-Le flush qui marche est dans [src/hal/display.cpp](/Users/damien/Documents/Arduino/CompagnonV2/src/hal/display.cpp):
-
-```cpp
-co5300::flush(
-    area->x1 + LCD_MARGIN_H,
-    area->y1 + LCD_MARGIN_V,
-    area->x2 + LCD_MARGIN_H,
-    area->y2 + LCD_MARGIN_V,
-    (const uint16_t*)px_map
-);
-```
+La zone utile éventuelle doit être traitée par le layout applicatif, pas en modifiant les coordonnées du display ou du touch.
 
 ## Orientation écran
 
-Réglage retenu:
+Réglages validés:
 
-- `LCD_ROTATION = 3`
+- `LCD_ROTATION = 3` dans `include/pins.h`
+- `co5300::init()` appelle `_gfx->setRotation(0)`
+- `display.cpp` convertit `LCD_ROTATION` en rotation logicielle de montage inverse:
 
-Ce réglage est cohérent avec le CO5300 de cette carte et le rendu LVGL actuellement validé.
+```cpp
+return (lv_display_rotation_t)((4 - (LCD_ROTATION & 0x3)) & 0x3);
+```
 
-Quand l'affichage paraissait décalé de `+90°`, le vrai problème n'était pas uniquement LVGL. Il fallait garder:
+Avec `LCD_ROTATION = 3`, le log validé indique:
 
-- la rotation matérielle CO5300 qui donne le bon rendu visible
-- la transformation tactile cohérente avec cette orientation
+```text
+mount_rotation=1 ui_rotation=0 flush_rotation=1
+```
+
+La rotation effective utilisée par le flush est:
+
+```cpp
+flush_rotation = mount_rotation + ui_rotation mod 4
+```
+
+`ui_rotation` reste `0` au boot et devient dynamique avec le QMI8658.
+
+Point important: ne pas remettre `_gfx->setRotation(LCD_ROTATION)`. Sur CO5300 cela ne produit pas une vraie rotation et désynchronise le raisonnement touch/display.
+
+## Rotation auto QMI8658
+
+Le QMI8658 est lu dans `hal_imu_tick()` avec filtrage:
+
+- seuil axe minimal: `0.45 g`
+- dominance entre axes: `0.16 g`
+- stabilité: `4` échantillons
+
+La tâche UI interroge l'IMU toutes les `200 ms`. Quand l'orientation stable change, elle appelle:
+
+```cpp
+hal::display_set_rotation(_imu_orientation_to_rotation(ori));
+```
+
+Le repère du QMI8658 est à `180°` du repère visuel du boîtier. Table validée:
+
+```cpp
+orientation=0 -> ui_rotation=180
+orientation=1 -> ui_rotation=90
+orientation=2 -> ui_rotation=0
+orientation=3 -> ui_rotation=270
+```
+
+Quand la rotation UI change, `display_set_rotation()` doit forcer un redraw:
+
+```cpp
+lv_obj_invalidate(lv_screen_active());
+lv_obj_invalidate(lv_layer_top());
+lv_refr_now(_disp);
+```
 
 ## LVGL: point essentiel pour le tactile
 
@@ -90,9 +167,23 @@ lv_indev_t* touch_indev = lv_indev_create();
 lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
 lv_indev_set_read_cb(touch_indev, _touch_read_cb);
 lv_indev_set_display(touch_indev, lv_display_get_default());
+lv_timer_pause(lv_indev_get_read_timer(touch_indev));
 ```
 
 Sans `lv_indev_set_display(...)`, le touch pouvait être créé mais aucun événement utile n'arrivait dans l'UI.
+
+Dans ce projet, le timer interne de lecture LVGL est mis en pause. La tâche UI fait ensuite une lecture explicite unique par boucle:
+
+```cpp
+ui::dispatch_flush();
+lv_indev_read(touch_indev);
+ui_status_bar_touch_tick();
+ui_launcher_touch_tick();
+ui::notification_tick();
+lv_timer_handler();
+```
+
+Ce point a été nécessaire sur cette stack: sans lecture explicite, plus aucun log tactile n'apparaissait; avec deux lectures par boucle, les séquences `press/release/click` pouvaient être cassées.
 
 ## Règle de thread LVGL
 
@@ -167,51 +258,54 @@ Le tactile fonctionne en revenant à une chaîne simple:
 
 1. initialisation du CST92xx via `SensorLib`
 2. lecture du point via `SensorLib`
-3. transformation locale des coordonnées vers la zone utile LVGL
+3. mapping local des coordonnées vers le repère LVGL visible
 
 Code retenu dans [src/hal/touch.cpp](/Users/damien/Documents/Arduino/CompagnonV2/src/hal/touch.cpp):
 
 ```cpp
 _drv.setMaxCoordinates(480, 480);
-_drv.setSwapXY(true);
-_drv.setMirrorXY(true, false);
+_drv.setSwapXY(false);
+_drv.setMirrorXY(false, false);
 ```
 
 et pour la lecture:
 
 ```cpp
-const TouchPoints& points = _drv.getTouchPoints();
-uint8_t count = points.getPointCount();
-if (count > 0) {
-    const TouchPoint& pt = points.getPoint(0);
-    _map_touch_to_lvgl(pt.x, pt.y, x, y);
-    return true;
-}
+uint8_t count = _drv.getPoint(_raw_x, _raw_y, max_points);
 ```
 
 ### Transformation tactile retenue
 
-Le touch renvoie des coordonnées sur `480x480`. Ensuite on retire les marges du boîtier:
+Le touch renvoie des coordonnées physiques `480x480`. `raw_x/raw_y` sont conservés pour debug, puis `x/y` sont mappés dans le repère LVGL visible selon `hal::display_get_rotation()`.
 
 ```cpp
-int32_t lx = sensor_x - LCD_MARGIN_H;
-int32_t ly = sensor_y - LCD_MARGIN_V;
+ROT_0   : x = raw_x,             y = raw_y
+ROT_90  : x = (LCD_HEIGHT-1)-raw_y, y = raw_x
+ROT_180 : x = (LCD_WIDTH-1)-raw_x,  y = (LCD_HEIGHT-1)-raw_y
+ROT_270 : x = raw_y,                y = (LCD_WIDTH-1)-raw_x
 ```
-
-puis on clamp vers la zone LVGL `440x460`.
 
 Cette combinaison fonctionne avec:
 
-- `setSwapXY(true)`
-- `setMirrorXY(true, false)`
-- `rotation=3` côté écran
-- les marges visibles `20 px / 10 px` retranchées après lecture capteur
+- `setSwapXY(false)`
+- `setMirrorXY(false, false)`
+- LVGL déclaré en `480x480`
+- rotation affichage faite dans le flush
+- mapping tactile fait dans `touch.cpp`
 
-Ce réglage est aligné sur l'exemple Waveshare LVGL pour cette carte. Le symptôme typique d'un miroir faux était simple:
+Le symptôme typique d'un mapping faux:
 
 - le touch semblait "vivre"
 - les logs montraient des coordonnées plausibles
 - mais le clic tombait sur la mauvaise icône ou sur la mauvaise app
+
+Le symptôme typique d'une lecture indev mal orchestrée:
+
+- le touch est initialisé
+- mais aucun `[TOUCH] sensor=...` n'apparaît après le boot
+- ou les coordonnées apparaissent mais `LV_EVENT_CLICKED` ne déclenche pas
+
+Le correctif validé est: un seul `lv_indev_read(touch_indev)` explicite par boucle UI, avec le timer interne en pause.
 
 ## Touch IRQ
 
@@ -289,7 +383,15 @@ Ca indiquait un mauvais chemin de lecture tactile bas niveau. Le correctif utile
 
 Ce log apparaît si on demande un point alors que l'objet interne n'a pas de point valide au moment précis de l'accès.
 
-Ce log apparaissait avec une ancienne variante. La lecture actuelle via `getTouchPoints()` puis `getPoint(0)` uniquement quand `count > 0` évite ce faux accès.
+Ce log peut encore apparaître ponctuellement dans `TouchPoints.cpp` lors du relâchement, mais il n'est pas bloquant si les logs suivants existent:
+
+```text
+[TOUCH] sensor=... -> lv=...
+[UI] launcher sel ...
+[UI] launch app ...
+```
+
+Il devient bloquant uniquement s'il s'accompagne d'une absence de coordonnées ou d'une absence d'événements launcher.
 
 ## Réglages de build validés
 
@@ -313,14 +415,21 @@ Commande de compilation utilisée côté CLI:
 
 ## Règles à réutiliser sur un autre projet
 
-1. Garder l'écran en `480x480` physique mais enregistrer LVGL en zone utile `440x460`.
-2. Appliquer les offsets de marges dans le `flush`, pas en trichant dans toutes les apps.
-3. Rattacher explicitement le tactile au display LVGL avec `lv_indev_set_display(...)`.
-4. Ne pas bricoler une lecture raw I2C du CST92xx si `SensorLib` est déjà capable de parler au contrôleur.
-5. Ne pas réinitialiser `Wire` dans le module touch.
-6. Garder une seule tâche propriétaire de LVGL.
-7. Faire en sorte que la zone tactile d'une icône soit plus grande que son dessin.
-8. Si le tactile lance la mauvaise app, vérifier d'abord `swap/mirror` avant de toucher à la logique du launcher.
+1. Garder écran et LVGL en `480x480`.
+2. Ne pas utiliser `Arduino_CO5300::setRotation()` pour une vraie rotation 90/270.
+3. Faire la rotation 90/270 dans le `flush_cb`, avec un buffer temporaire.
+4. Garder `LCD_ROTATION` comme orientation de montage, mais inverser son sens pour la rotation logicielle.
+5. Garder `raw_x/raw_y` CST9220 en debug et mapper `x/y` selon `display_get_rotation()`.
+6. Ne pas appliquer `swapXY`/`mirrorXY` dans SensorLib tant que le mapping logiciel gère la rotation.
+7. Rattacher explicitement le tactile au display LVGL avec `lv_indev_set_display(...)`.
+8. Mettre en pause le timer interne indev et faire une seule lecture explicite par boucle UI.
+9. Ne pas bricoler une lecture raw I2C du CST92xx si `SensorLib` est déjà capable de parler au contrôleur.
+10. Ne pas réinitialiser `Wire` dans le module touch.
+11. Garder une seule tâche propriétaire de LVGL.
+12. Faire en sorte que la zone tactile d'une icône soit plus grande que son dessin.
+13. Si le tactile lance la mauvaise app, vérifier d'abord la formule `display_get_rotation() -> touch map`.
+14. Si le tactile ne log plus rien, vérifier d'abord la lecture indev LVGL.
+15. Si le boot est droit mais la rotation auto est inversée de `180°`, corriger la table QMI8658 -> `ui_rotation`, pas le flush de base.
 
 ## Ce qu'il reste à faire plus tard
 

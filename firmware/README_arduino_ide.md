@@ -57,3 +57,18 @@ Aucune manipulation supplémentaire n'est nécessaire — `setCACertBundle()` fo
 
 Le projet utilise la PSRAM pour les buffers LVGL et les vecteurs TTS (jusqu'à ~500KB PCM).
 Vérifier que `#define BOARD_HAS_PSRAM` est présent ou que PSRAM est activée dans les réglages du board.
+
+## Note écran / tactile Waveshare 2.16
+
+Pour cette carte, ne pas utiliser `Arduino_CO5300::setRotation()` comme source de vérité pour une rotation 90/270: le CO5300 via Arduino_GFX ne fait pas de vraie rotation, seulement des flips MADCTL.
+
+Le bring-up validé utilise:
+
+- CO5300 en rotation matérielle `0`
+- LVGL en `480x480`
+- rotation logicielle dans le `flush_cb`
+- mapping CST9220 selon la rotation effective du flush
+- lecture indev LVGL unique dans la tâche UI
+- rotation auto QMI8658 avec offset de `180°`
+
+Voir [WAVESHARE_2_16_BRINGUP.md](/Users/damien/Documents/Arduino/CompagnonV2/WAVESHARE_2_16_BRINGUP.md) avant de réutiliser ce HAL dans un autre projet.

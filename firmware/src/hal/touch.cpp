@@ -88,7 +88,7 @@ bool hal::touch_init() {
         pinMode(PIN_TP_INT, INPUT_PULLUP);
         _drv.setMaxCoordinates(480, 480);
         attachInterrupt(digitalPinToInterrupt(PIN_TP_INT), _touch_irq_isr, FALLING);
-        // Pas de swap/mirror hardware — os_main.cpp gère le mapping visible.
+        // Pas de swap/mirror hardware — _map_touch_to_lvgl() gere le mapping visible.
         _drv.setSwapXY(false);
         _drv.setMirrorXY(false, false);
         _ok = true;
