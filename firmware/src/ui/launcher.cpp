@@ -10,6 +10,7 @@
 // ============================================================
 #include "launcher.h"
 #include "status_bar.h"
+#include "ui_dispatch.h"
 #include "../hal/display.h"
 #include "../hal/touch.h"
 #include "../system/os_kernel.h"
@@ -58,6 +59,7 @@ static lv_obj_t* _dots[PAGE_COUNT] = {};
 static lv_obj_t* _bg_objs[16] = {};
 static uint8_t   _bg_obj_count = 0;
 static uint8_t   _bg_style_loaded = 0xFF;
+static bool      _launcher_finalize_pending = false;
 
 struct TileEventCtx {
     int  linear = -1;
@@ -567,8 +569,11 @@ void ui_launcher_show() {
         Serial.println("[UI] launcher show -> raise status");
         ui_status_bar_raise();
         Serial.println("[UI] launcher show -> schedule finalize");
-        if (lv_async_call(_launcher_show_finalize_async, nullptr) != LV_RESULT_OK) {
-            Serial.println("[UI] launcher show -> async FAILED, fallback inline");
+        if (!_launcher_finalize_pending &&
+            ui::dispatch_post([]() { _launcher_show_finalize_async(nullptr); })) {
+            _launcher_finalize_pending = true;
+        } else {
+            Serial.println("[UI] launcher show -> dispatch FAILED, fallback inline");
             _sync_selection();
             lv_obj_invalidate(lv_scr_act());
             Serial.printf("[UI] launcher show done active_after=%p\n", lv_scr_act());
@@ -578,6 +583,7 @@ void ui_launcher_show() {
 
 static void _launcher_show_finalize_async(void* user_data) {
     (void)user_data;
+    _launcher_finalize_pending = false;
     Serial.println("[UI] launcher show finalize -> sync selection");
     _sync_selection();
     lv_obj_invalidate(lv_scr_act());
