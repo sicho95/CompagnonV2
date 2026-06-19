@@ -86,6 +86,7 @@ static const lv_color_t DOT_IDLE     = LV_COLOR_MAKE(0x45, 0x52, 0x70);
 static const lv_color_t DOT_ACTIVE   = LV_COLOR_MAKE(0xE8, 0xF3, 0xFF);
 
 static void _tile_event_cb(lv_event_t* e);
+static void _launcher_show_finalize_async(void* user_data);
 
 static void _bg_track(lv_obj_t* obj) {
     if (_bg_obj_count < (sizeof(_bg_objs) / sizeof(_bg_objs[0]))) {
@@ -565,9 +566,20 @@ void ui_launcher_show() {
         lv_scr_load(_screen);
         Serial.println("[UI] launcher show -> raise status");
         ui_status_bar_raise();
-        Serial.println("[UI] launcher show -> sync selection");
-        _sync_selection();
-        lv_obj_invalidate(lv_scr_act());
-        Serial.printf("[UI] launcher show done active_after=%p\n", lv_scr_act());
+        Serial.println("[UI] launcher show -> schedule finalize");
+        if (lv_async_call(_launcher_show_finalize_async, nullptr) != LV_RESULT_OK) {
+            Serial.println("[UI] launcher show -> async FAILED, fallback inline");
+            _sync_selection();
+            lv_obj_invalidate(lv_scr_act());
+            Serial.printf("[UI] launcher show done active_after=%p\n", lv_scr_act());
+        }
     }
+}
+
+static void _launcher_show_finalize_async(void* user_data) {
+    (void)user_data;
+    Serial.println("[UI] launcher show finalize -> sync selection");
+    _sync_selection();
+    lv_obj_invalidate(lv_scr_act());
+    Serial.printf("[UI] launcher show done active_after=%p\n", lv_scr_act());
 }
