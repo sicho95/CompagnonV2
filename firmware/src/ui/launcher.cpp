@@ -228,7 +228,6 @@ static void _sync_selection() {
     _update_dots();
     _highlight_selection();
     lv_obj_invalidate(_screen);
-    hal::display_force_refresh();
     Serial.printf("[UI] launcher sel page=%d slot=%d idx=%d\n",
                   _cur_page, _cur_slot, _linear_index());
 }
@@ -548,7 +547,6 @@ void ui_launcher_init() {
 
     lv_scr_load(_screen);
     ui_status_bar_raise();
-    hal::display_force_refresh();
     Serial.println("[UI] launcher grid OK");
 }
 
@@ -570,7 +568,6 @@ void ui_launcher_show() {
         Serial.println("[UI] launcher show -> sync selection");
         _sync_selection();
         lv_obj_invalidate(lv_scr_act());
-        hal::display_force_refresh();
         Serial.printf("[UI] launcher show done active_after=%p\n", lv_scr_act());
     }
 }
