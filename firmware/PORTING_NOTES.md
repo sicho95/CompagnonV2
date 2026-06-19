@@ -66,8 +66,11 @@ Résumé à respecter dans un nouveau projet:
 - `LCD_ROTATION` utilisé comme orientation de montage seulement
 - rotation 90/270 faite dans le `flush_cb`
 - LVGL en plein `480x480`
+- safe area de layout distincte, ici `450x460`
 - CST9220 sans swap/mirror SensorLib
 - `touch.cpp` mappe les coordonnées selon `display_get_rotation()`
 - une seule lecture indev explicite par boucle UI
+- `lv_timer_handler()` passe avant les ticks gesture custom
 - timer interne indev mis en pause
+- `app_launch()` / `app_close_current()` sont sérialisés sur le thread UI
 - QMI8658 filtré et converti avec offset de `180°`

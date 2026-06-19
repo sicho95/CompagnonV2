@@ -66,9 +66,11 @@ Le bring-up validé utilise:
 
 - CO5300 en rotation matérielle `0`
 - LVGL en `480x480`
+- safe area de layout `450x460` (`15 px` gauche/droite, `10 px` haut/bas)
 - rotation logicielle dans le `flush_cb`
 - mapping CST9220 selon la rotation effective du flush
 - lecture indev LVGL unique dans la tâche UI
+- transitions `launch/close` sérialisées sur le thread UI
 - rotation auto QMI8658 avec offset de `180°`
 
 Voir [WAVESHARE_2_16_BRINGUP.md](/Users/damien/Documents/Arduino/CompagnonV2/WAVESHARE_2_16_BRINGUP.md) avant de réutiliser ce HAL dans un autre projet.

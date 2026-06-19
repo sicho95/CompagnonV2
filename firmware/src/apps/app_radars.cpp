@@ -1,4 +1,5 @@
 #include "app_radars.h"
+#include "../hal/display.h"
 #include "../net/wifi_mgr.h"
 #include "../ui/app_header.h"
 #include "../ui/status_bar.h"
@@ -112,6 +113,7 @@ void AppRadars::onResume() {
     lv_scr_load(_screen);
     ui_status_bar_raise();
     lv_obj_invalidate(lv_scr_act());
+    hal::display_force_refresh();
 }
 void AppRadars::update()  {}
 void AppRadars::onPause() {}

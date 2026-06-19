@@ -1,6 +1,7 @@
 #include "app_header.h"
 #include "../system/os_kernel.h"
 #include "../../include/pins.h"
+#include <Arduino.h>
 
 namespace {
 
@@ -13,6 +14,7 @@ constexpr int CLOSE_BTN_H  = 46;
 
 static void _close_event_cb(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    Serial.println("[UI] close button -> app_close_current");
     os::app_close_current();
 }
 

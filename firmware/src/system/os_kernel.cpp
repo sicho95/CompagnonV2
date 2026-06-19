@@ -27,6 +27,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <Arduino.h>
+#include <lvgl.h>
 
 namespace voice {
     inline void speak(const char* text) { voice_engine_speak(text); }
@@ -55,6 +56,14 @@ static QueueHandle_t _alarm_queue = nullptr;
 static constexpr const char* NVS_NS     = "os_cfg";
 static constexpr const char* NVS_SILENT = "silent";
 
+static bool _run_on_ui_thread(ui::UiTask fn) {
+    if (ui::dispatch_is_ui_thread()) {
+        fn();
+        return true;
+    }
+    return ui::dispatch_post(std::move(fn));
+}
+
 void kernel_init() {
     _intent_queue = xQueueCreate(8, sizeof(VoiceIntent));
     _alarm_queue  = xQueueCreate(4, sizeof(PendingAlarm));
@@ -81,31 +90,35 @@ bool app_launch(AppId id) {
     AppDesc& desc = _apps[(int)id];
     if (!desc.instance) return false;
 
-    // Pause app courante (pas de LVGL dans onPause en général)
-    if (_current_app != AppId::NONE && _current_app != id &&
-        _apps[(int)_current_app].instance)
-        _apps[(int)_current_app].instance->onPause();
-
-    _current_app = id;
-
     // _initialized capturé par valeur pour que la lambda sache si c'est
     // le premier lancement. On le passe à true DANS la lambda, APRES init(),
     // pour éviter qu'un crash dans init() marque l'app comme initialisée.
     bool already_init = _initialized[(int)id];
     AppBase* inst     = desc.instance;
     bool*    flag     = &_initialized[(int)id];
+    AppId    prev_id  = _current_app;
+    AppBase* prev     = nullptr;
+    if (prev_id != AppId::NONE && prev_id != id) {
+        prev = _apps[(int)prev_id].instance;
+    }
 
-    // UNE seule lambda fire-and-forget dans task_ui_lvgl.
-    // init() crée les widgets LVGL, onResume() charge l'écran.
-    // Aucun blocage possible sur task_os_main.
-    ui::dispatch_post([inst, already_init, flag]() {
+    if (!_run_on_ui_thread([inst, prev, prev_id, id, already_init, flag]() {
+        if (prev && prev_id == _current_app) {
+            prev->onPause();
+        }
         if (!already_init) {
             inst->init();
             *flag = true;   // marqué seulement après init() réussi
         }
+        _current_app = id;
         inst->onResume();
+        lv_obj_invalidate(lv_screen_active());
+        lv_obj_invalidate(lv_layer_top());
         hal::display_force_refresh();
-    });
+    })) {
+        Serial.printf("[KERNEL] app_launch %d -> dispatch FAILED\n", (int)id);
+        return false;
+    }
 
     Serial.printf("[KERNEL] app_launch %d → dispatched (init=%s)\n",
                   (int)id, already_init ? "skip" : "yes");
@@ -114,13 +127,21 @@ bool app_launch(AppId id) {
 
 void app_close_current() {
     if (_current_app == AppId::NONE) return;
+    AppId closing_id = _current_app;
     AppBase* inst = _apps[(int)_current_app].instance;
-    _current_app = AppId::NONE;
-    ui::dispatch_post([inst]() {
+    if (!_run_on_ui_thread([inst, closing_id]() {
+        if (_current_app != closing_id) return;
+        Serial.printf("[KERNEL] app_close_current %d\n", (int)closing_id);
         if (inst) inst->onPause();
+        _current_app = AppId::NONE;
         ui_launcher_show();
+        lv_obj_invalidate(lv_screen_active());
+        lv_obj_invalidate(lv_layer_top());
         hal::display_force_refresh();
-    });
+    })) {
+        Serial.printf("[KERNEL] app_close_current %d -> dispatch FAILED\n",
+                      (int)closing_id);
+    }
 }
 
 AppId    app_current()              { return _current_app; }

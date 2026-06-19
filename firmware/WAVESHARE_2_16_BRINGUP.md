@@ -18,6 +18,7 @@ Architecture validée:
 
 - écran CO5300 initialisé en rotation matérielle `0`
 - LVGL déclaré en plein `480x480`
+- contenu applicatif contraint à une safe area `450x460` dans le layout
 - `LCD_ROTATION = 3` conservé comme orientation de montage historique
 - orientation de montage convertie en rotation logicielle inverse dans `display.cpp`
 - `flush_cb` tourne les pixels avant `draw16bitRGBBitmap()`
@@ -25,6 +26,7 @@ Architecture validée:
 - `touch.cpp` mappe `raw_x/raw_y` vers `x/y` dans le repère LVGL visible selon `display_get_rotation()`
 - LVGL reste en rotation interne `0` pour éviter une seconde transformation automatique
 - l'indev LVGL est rattaché au display, son timer interne est mis en pause, puis lu explicitement une seule fois par boucle UI
+- `app_launch()` et `app_close_current()` passent toujours par une transition atomique sur le thread UI
 - QMI8658 ajoute une rotation UI dynamique, avec offset de `180°` entre son repère et le repère visuel du boîtier
 - `display_set_rotation()` invalide l'écran actif et la couche top, puis force `lv_refr_now()`
 
@@ -94,8 +96,21 @@ Conséquence:
 - LVGL est enregistré en `480x480`
 - le touch CST9220 reste dans le même repère brut `480x480`
 - les marges ne doivent pas être soustraites dans le HAL tactile
+- le masque boîtier est traité uniquement comme contrainte de layout via `LCD_SAFE_X/Y/W/H`
 
 La zone utile éventuelle doit être traitée par le layout applicatif, pas en modifiant les coordonnées du display ou du touch.
+
+La safe area retenue sur ce boîtier est:
+
+- `x = 15 .. 464`
+- `y = 10 .. 469`
+- `w = 450`
+- `h = 460`
+
+Concrètement:
+
+- status bar, launcher, footer dots, notifications et bouton `X` restent dans cette zone
+- les écrans d'app restent en fond `480x480`, mais leurs widgets utiles se placent dans `ui_app_content_x()` / `ui_app_content_width()`
 
 ## Orientation écran
 
@@ -177,13 +192,17 @@ Dans ce projet, le timer interne de lecture LVGL est mis en pause. La tâche UI 
 ```cpp
 ui::dispatch_flush();
 lv_indev_read(touch_indev);
+lv_timer_handler();
 ui_status_bar_touch_tick();
 ui_launcher_touch_tick();
 ui::notification_tick();
-lv_timer_handler();
 ```
 
-Ce point a été nécessaire sur cette stack: sans lecture explicite, plus aucun log tactile n'apparaissait; avec deux lectures par boucle, les séquences `press/release/click` pouvaient être cassées.
+Ce point a été nécessaire sur cette stack:
+
+- sans lecture explicite, plus aucun log tactile n'apparaissait
+- avec deux lectures par boucle, les séquences `press/release/click` pouvaient être cassées
+- si `ui_launcher_touch_tick()` passait avant `lv_timer_handler()`, certains `LV_EVENT_CLICKED` pouvaient être perturbés
 
 ## Règle de thread LVGL
 
@@ -195,6 +214,15 @@ Dans ce projet:
 - les autres tâches postent ou mettent à jour leur état, mais ne pilotent pas directement LVGL
 
 Cette règle évite des comportements incohérents au retour launcher / ouverture d'app.
+
+Corollaire important pour ce projet:
+
+- `app_launch()` et `app_close_current()` ne doivent pas modifier l'état écran hors thread UI
+- si l'appel vient déjà du thread UI, la transition s'exécute inline
+- sinon elle est postée via `ui::dispatch_post(...)`
+- `_current_app` n'est changé qu'au moment de la transition UI effective
+
+Cette règle évite le cas où une app serait marquée fermée logiquement, mais resterait visuellement affichée si la queue UI échouait.
 
 ## I2C partagé: ce qu'il faut faire
 
@@ -430,6 +458,9 @@ Commande de compilation utilisée côté CLI:
 13. Si le tactile lance la mauvaise app, vérifier d'abord la formule `display_get_rotation() -> touch map`.
 14. Si le tactile ne log plus rien, vérifier d'abord la lecture indev LVGL.
 15. Si le boot est droit mais la rotation auto est inversée de `180°`, corriger la table QMI8658 -> `ui_rotation`, pas le flush de base.
+16. Ne jamais réduire LVGL à `450x460`: garder `480x480` et appliquer la safe area dans le layout.
+17. Le bouton `X` d'une app doit être créé au premier plan, après le contenu principal.
+18. Les transitions `launch/close` doivent rester atomiques sur le thread UI.
 
 ## Ce qu'il reste à faire plus tard
 

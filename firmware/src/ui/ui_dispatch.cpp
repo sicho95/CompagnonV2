@@ -11,9 +11,11 @@
 namespace ui {
 
 static QueueHandle_t _q = nullptr;
+static TaskHandle_t  _ui_task = nullptr;
 
 void dispatch_init() {
     _q = xQueueCreate(UI_QUEUE_LEN, sizeof(UiTask));
+    _ui_task = xTaskGetCurrentTaskHandle();
 }
 
 bool dispatch_post(UiTask fn) {
@@ -37,6 +39,10 @@ void dispatch_flush() {
             delete fn_ptr;
         }
     }
+}
+
+bool dispatch_is_ui_thread() {
+    return _ui_task && xTaskGetCurrentTaskHandle() == _ui_task;
 }
 
 } // namespace ui

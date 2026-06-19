@@ -89,10 +89,10 @@ static void task_ui_lvgl(void*) {
     for (;;) {
         ui::dispatch_flush();
         lv_indev_read(touch_indev);
+        lv_timer_handler();
         ui_status_bar_touch_tick();
         ui_launcher_touch_tick();
         ui::notification_tick();
-        lv_timer_handler();
         uint32_t now = millis();
         if (now - last_status_tick >= 1000) {
             last_status_tick = now;

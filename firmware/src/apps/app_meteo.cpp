@@ -8,6 +8,7 @@
 // ============================================================
 #include "app_meteo.h"
 #include "../config/nvs_config.h"
+#include "../hal/display.h"
 #include "../ui/app_header.h"
 #include "../ui/status_bar.h"
 #include <lvgl.h>
@@ -147,6 +148,7 @@ void AppMeteo::onResume() {
     lv_scr_load(_screen);
     ui_status_bar_raise();
     lv_obj_invalidate(lv_scr_act());
+    hal::display_force_refresh();
     _fetch();
 }
 
