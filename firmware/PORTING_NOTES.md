@@ -74,6 +74,7 @@ Résumé à respecter dans un nouveau projet:
 - timer interne indev mis en pause
 - `app_launch()` / `app_close_current()` sont sérialisés sur le thread UI
 - si l'action vient d'un callback LVGL, `launch/close` est différé via `lv_async_call()`
+- un verrou court de transition ignore les nouveaux launch/close pendant la stabilisation écran
 - les transitions et `onResume()` ne doivent pas appeler `display_force_refresh()` / `lv_refr_now()`
 - après `launch/close`, utiliser `display_request_refresh()` ; la task UI consomme ensuite la demande hors callback
 - aucune app ne fait d'HTTP bloquant dans `init()` / `onResume()`

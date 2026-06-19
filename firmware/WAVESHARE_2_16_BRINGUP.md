@@ -223,6 +223,7 @@ Corollaire important pour ce projet:
 - si l'appel vient déjà d'un callback LVGL, la transition est reportée au prochain `lv_timer_handler()` via `lv_async_call()`
 - sinon elle est postée via `ui::dispatch_post(...)`
 - `_current_app` n'est changé qu'au moment de la transition UI effective
+- un verrou court ignore les commandes `launch/close` concurrentes ou trop rapprochées pendant la stabilisation
 - les transitions `launch/close`, `onResume()` et callbacks de données ne doivent pas appeler `display_force_refresh()` / `lv_refr_now()`
 - après un changement d'écran, on invalide les objets et on laisse le tick LVGL normal faire le redraw complet
 - si le panel doit être rafraîchi immédiatement après une transition, appeler `display_request_refresh()`

@@ -47,6 +47,8 @@ static AppId     _current_app = AppId::NONE;
 static bool      _silent      = false;
 static bool      _time_valid  = false;
 static bool      _initialized[(int)AppId::COUNT] = {};
+static bool      _transition_pending = false;
+static uint32_t  _transition_locked_until_ms = 0;
 
 static QueueHandle_t _intent_queue = nullptr;
 
@@ -76,6 +78,20 @@ static bool _schedule_ui_transition(ui::UiTask fn) {
     return ui::dispatch_post(std::move(fn));
 }
 
+static bool _transition_is_locked() {
+    return _transition_pending ||
+           (int32_t)(millis() - _transition_locked_until_ms) < 0;
+}
+
+static void _transition_lock() {
+    _transition_pending = true;
+}
+
+static void _transition_unlock_after(uint32_t settle_ms) {
+    _transition_pending = false;
+    _transition_locked_until_ms = millis() + settle_ms;
+}
+
 void kernel_init() {
     _intent_queue = xQueueCreate(8, sizeof(VoiceIntent));
     _alarm_queue  = xQueueCreate(4, sizeof(PendingAlarm));
@@ -99,8 +115,13 @@ void apps_register_all() {
 
 bool app_launch(AppId id) {
     if (id == AppId::NONE || (int)id >= (int)AppId::COUNT) return false;
+    if (_transition_is_locked()) {
+        Serial.printf("[KERNEL] app_launch %d -> ignored, transition busy\n", (int)id);
+        return false;
+    }
     AppDesc& desc = _apps[(int)id];
     if (!desc.instance) return false;
+    _transition_lock();
 
     // _initialized capturé par valeur pour que la lambda sache si c'est
     // le premier lancement. On le passe à true DANS la lambda, APRES init(),
@@ -127,8 +148,10 @@ bool app_launch(AppId id) {
         lv_obj_invalidate(lv_screen_active());
         lv_obj_invalidate(lv_layer_top());
         hal::display_request_refresh();
+        _transition_unlock_after(180);
         Serial.printf("[KERNEL] app_launch %d -> screen requested\n", (int)id);
     })) {
+        _transition_pending = false;
         Serial.printf("[KERNEL] app_launch %d -> dispatch FAILED\n", (int)id);
         return false;
     }
@@ -140,10 +163,18 @@ bool app_launch(AppId id) {
 
 void app_close_current() {
     if (_current_app == AppId::NONE) return;
+    if (_transition_is_locked()) {
+        Serial.println("[KERNEL] app_close_current -> ignored, transition busy");
+        return;
+    }
     AppId closing_id = _current_app;
     AppBase* inst = _apps[(int)_current_app].instance;
+    _transition_lock();
     if (!_schedule_ui_transition([inst, closing_id]() {
-        if (_current_app != closing_id) return;
+        if (_current_app != closing_id) {
+            _transition_unlock_after(80);
+            return;
+        }
         Serial.printf("[KERNEL] app_close_current %d\n", (int)closing_id);
         if (inst) inst->onPause();
         _current_app = AppId::NONE;
@@ -151,8 +182,10 @@ void app_close_current() {
         lv_obj_invalidate(lv_screen_active());
         lv_obj_invalidate(lv_layer_top());
         hal::display_request_refresh();
+        _transition_unlock_after(180);
         Serial.printf("[KERNEL] app_close_current %d -> launcher requested\n", (int)closing_id);
     })) {
+        _transition_pending = false;
         Serial.printf("[KERNEL] app_close_current %d -> dispatch FAILED\n",
                       (int)closing_id);
     }
