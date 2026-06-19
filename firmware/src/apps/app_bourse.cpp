@@ -26,11 +26,10 @@ void AppBourse::init() {
     _screen = lv_obj_create(nullptr);
     lv_obj_set_style_bg_color(_screen, lv_color_black(), 0);  // AMOLED
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
-    ui_app_header_attach(_screen);
 
     lv_obj_t* hdr = lv_obj_create(_screen);
-    lv_obj_set_size(hdr, 480, 44);
-    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, ui_app_header_bar_y());
+    lv_obj_set_size(hdr, ui_app_content_width(), ui_app_header_bar_h());
+    lv_obj_set_pos(hdr, ui_app_content_x(), ui_app_header_bar_y());
     lv_obj_set_style_bg_color(hdr, lv_color_black(), 0);
     lv_obj_set_style_border_width(hdr, 1, 0);
     lv_obj_set_style_border_side(hdr, LV_BORDER_SIDE_BOTTOM, 0);
@@ -44,8 +43,8 @@ void AppBourse::init() {
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 8, 0);
 
     lv_obj_t* cont = lv_obj_create(_screen);
-    lv_obj_set_size(cont, 480, ui_app_content_height());
-    lv_obj_set_pos(cont, 0, ui_app_content_top());
+    lv_obj_set_size(cont, ui_app_content_width(), ui_app_content_height());
+    lv_obj_set_pos(cont, ui_app_content_x(), ui_app_content_top());
     lv_obj_set_style_bg_color(cont, lv_color_black(), 0);  // AMOLED
     lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(cont, 0, 0);
@@ -92,6 +91,7 @@ void AppBourse::init() {
         lv_obj_set_style_text_color(chg, _chg_color(_tickers[i].chg_pct), 0);
         lv_obj_align(chg, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
     }
+    ui_app_header_attach(_screen);
     Serial.println("[Bourse] init");
 }
 

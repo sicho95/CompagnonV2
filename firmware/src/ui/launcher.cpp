@@ -403,8 +403,8 @@ static void _tile_event_cb(lv_event_t* e) {
 static void _build_footer(lv_obj_t* parent) {
     int32_t dot_spacing = 10;
     int32_t total_w = PAGE_COUNT * 8 + (PAGE_COUNT - 1) * dot_spacing;
-    int32_t x = (LV_HOR_RES - total_w) / 2;
-    int32_t y = LV_VER_RES - FOOTER_H + 8;
+    int32_t x = LCD_SAFE_X + (LCD_SAFE_WIDTH - total_w) / 2;
+    int32_t y = LCD_SAFE_Y + LCD_SAFE_HEIGHT - FOOTER_H + 8;
 
     for (int i = 0; i < PAGE_COUNT; ++i) {
         _dots[i] = lv_obj_create(parent);
@@ -478,7 +478,8 @@ void ui_launcher_touch_tick() {
         _gesture_track = true;
         _gesture_swipe_locked = false;
         _gesture_click_suppressed = false;
-        _gesture_status_origin = (frame.points[0].y < STATUS_BAR_H);
+        _gesture_status_origin = (frame.points[0].y >= LCD_SAFE_Y &&
+                                  frame.points[0].y < (LCD_SAFE_Y + STATUS_BAR_H));
         _gesture_start_x = frame.points[0].x;
         _gesture_start_y = frame.points[0].y;
         return;
@@ -522,8 +523,9 @@ void ui_launcher_init() {
     _build_background(cfg_get_u8(NVS_KEY_LAUNCHER_BG, 0));
 
     lv_obj_t* content = lv_obj_create(_screen);
-    lv_obj_set_pos(content, 0, STATUS_BAR_H + 2);
-    lv_obj_set_size(content, LV_HOR_RES, LV_VER_RES - STATUS_BAR_H - FOOTER_H - 2);
+    lv_obj_set_pos(content, LCD_SAFE_X, LCD_SAFE_Y + STATUS_BAR_H + 2);
+    lv_obj_set_size(content, LCD_SAFE_WIDTH,
+                    LCD_SAFE_HEIGHT - STATUS_BAR_H - FOOTER_H - 2);
     lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(content, 0, 0);
     lv_obj_set_style_pad_all(content, 0, 0);

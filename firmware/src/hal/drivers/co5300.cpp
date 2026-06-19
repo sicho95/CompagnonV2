@@ -2,9 +2,8 @@
 // CompagnonV2 — drivers/co5300.cpp
 // CO5300 AMOLED QSPI — implémentation
 // IMPORTANT : init en 480x480 PHYSIQUE.
-// L'offset boîtier (LCD_MARGIN_H/V) est appliqué dans display.cpp
-// lors du flush. Si le GFX est init en 440x460, draw16bitRGBBitmap
-// clampe les coords et l'image reste collée en haut-gauche.
+// Les marges boitier sont une safe area UI uniquement. Ne pas réduire
+// le driver ou le display LVGL, sinon le tactile 480x480 se désaligne.
 //
 // ROTATION : le CO5300 ne sait pas faire une vraie rotation 90/270.
 // Le driver reste donc en rotation matérielle 0 ; la rotation d'image
@@ -22,8 +21,7 @@ void init() {
         PIN_LCD_CS, PIN_LCD_SCLK,
         PIN_LCD_SIO0, PIN_LCD_SI1, PIN_LCD_SI2, PIN_LCD_SI3
     );
-    // Init en résolution physique complète 480x480
-    // (pas en zone utile 440x460)
+    // Init en résolution physique complète 480x480.
     _gfx = new Arduino_CO5300(
         _bus, PIN_LCD_RST, 0,
         LCD_WIDTH_PHYS, LCD_HEIGHT_PHYS, 0, 0, 0, 0

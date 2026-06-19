@@ -51,11 +51,10 @@ void AppMeteo::init() {
     _screen = lv_obj_create(nullptr);
     lv_obj_set_style_bg_color(_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
-    ui_app_header_attach(_screen);
 
     lv_obj_t* hdr = lv_obj_create(_screen);
-    lv_obj_set_size(hdr, 480, 44);
-    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, ui_app_header_bar_y());
+    lv_obj_set_size(hdr, ui_app_content_width(), ui_app_header_bar_h());
+    lv_obj_set_pos(hdr, ui_app_content_x(), ui_app_header_bar_y());
     lv_obj_set_style_bg_color(hdr, lv_color_black(), 0);
     lv_obj_set_style_border_width(hdr, 1, 0);
     lv_obj_set_style_border_side(hdr, LV_BORDER_SIDE_BOTTOM, 0);
@@ -77,7 +76,7 @@ void AppMeteo::init() {
     lv_obj_align(src, LV_ALIGN_RIGHT_MID, -8, 0);
 
     lv_obj_t* main_card = lv_obj_create(_screen);
-    lv_obj_set_size(main_card, 460, 130);
+    lv_obj_set_size(main_card, ui_app_content_width(), 130);
     lv_obj_align(main_card, LV_ALIGN_TOP_MID, 0, ui_app_content_top());
     lv_obj_set_style_bg_color(main_card, lv_color_hex(0x050D1A), 0);
     lv_obj_set_style_bg_opa(main_card, LV_OPA_COVER, 0);
@@ -100,7 +99,7 @@ void AppMeteo::init() {
     lv_obj_align(_desc_lbl, LV_ALIGN_RIGHT_MID, -8, 0);
 
     lv_obj_t* fc_cont = lv_obj_create(_screen);
-    lv_obj_set_size(fc_cont, 460, 80);
+    lv_obj_set_size(fc_cont, ui_app_content_width(), 80);
     lv_obj_align(fc_cont, LV_ALIGN_TOP_MID, 0, ui_app_content_top() + 140);
     lv_obj_set_style_bg_color(fc_cont, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(fc_cont, LV_OPA_COVER, 0);
@@ -140,6 +139,7 @@ void AppMeteo::init() {
         lv_obj_set_style_text_font(_tmin_lbl[i], &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(_tmin_lbl[i], lv_color_hex(0x64B5F6), 0);
     }
+    ui_app_header_attach(_screen);
     Serial.println("[Meteo] init");
 }
 

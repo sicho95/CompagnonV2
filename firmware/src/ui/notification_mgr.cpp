@@ -11,6 +11,7 @@
 // quelle tâche via lv_async_call() pour rester sur le thread LVGL.
 // ============================================================
 #include "notification_mgr.h"
+#include "../../include/pins.h"
 #include <Arduino.h>
 #include <lvgl.h>
 
@@ -36,11 +37,9 @@ static void _ensure_widget() {
     lv_obj_t* scr = lv_scr_act();
     _toast = lv_obj_create(scr);
 
-    // Géométrie : largeur plein écran, hauteur 48 px, ancré en haut
-    lv_obj_set_size(_toast,
-        lv_obj_get_width(scr),
-        48);
-    lv_obj_align(_toast, LV_ALIGN_TOP_MID, 0, 0);
+    // Géométrie : largeur safe area, hauteur 48 px, ancré en haut visible.
+    lv_obj_set_size(_toast, LCD_SAFE_WIDTH, 48);
+    lv_obj_set_pos(_toast, LCD_SAFE_X, LCD_SAFE_Y);
 
     // Style fond semi-transparent
     lv_obj_set_style_bg_color(_toast,  lv_color_black(), 0);
@@ -55,7 +54,7 @@ static void _ensure_widget() {
     lv_obj_set_style_text_color(_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(_label, &lv_font_montserrat_16, 0);
     lv_label_set_long_mode(_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_width(_label, lv_obj_get_width(scr) - 24);
+    lv_obj_set_width(_label, LCD_SAFE_WIDTH - 24);
     lv_obj_align(_label, LV_ALIGN_LEFT_MID, 8, 0);
 
     // Caché par défaut

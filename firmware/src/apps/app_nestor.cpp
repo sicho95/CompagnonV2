@@ -13,13 +13,12 @@ void AppNestor::init() {
     lv_obj_set_style_bg_color(_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(_screen, LV_OBJ_FLAG_SCROLLABLE);
-    ui_app_header_attach(_screen);
 
     lv_obj_t* title = lv_label_create(_screen);
     lv_label_set_text(title, LV_SYMBOL_AUDIO "  Nestor");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0x4FC3F7), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 16, ui_app_header_bar_y() + 8);
+    lv_obj_set_pos(title, ui_app_content_x() + 8, ui_app_header_bar_y() + 8);
 
     lv_obj_t* body = lv_label_create(_screen);
     lv_label_set_text(body, "Assistant vocal pret.");
@@ -29,12 +28,14 @@ void AppNestor::init() {
 
     _last_intent = lv_label_create(_screen);
     lv_label_set_text(_last_intent, "Aucune demande recue.");
-    lv_obj_set_width(_last_intent, LV_HOR_RES - 32);
+    lv_obj_set_width(_last_intent, ui_app_content_width() - 16);
     lv_label_set_long_mode(_last_intent, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(_last_intent, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(_last_intent, lv_color_hex(0x777799), 0);
-    lv_obj_align(_last_intent, LV_ALIGN_BOTTOM_MID, 0, -24);
+    lv_obj_set_pos(_last_intent, ui_app_content_x() + 8,
+                   ui_app_content_top() + ui_app_content_height() - 54);
 
+    ui_app_header_attach(_screen);
     Serial.println("[Nestor] init");
 }
 

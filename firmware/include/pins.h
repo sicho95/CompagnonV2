@@ -24,8 +24,8 @@
 #define LCD_HEIGHT_PHYS  480
 
 // Marges boîtier (masque physique)
-// 2 × 20 px horizontal, 2 × 10 px vertical
-#define LCD_MARGIN_H      20
+// 2 × 15 px horizontal, 2 × 10 px vertical
+#define LCD_MARGIN_H      15
 #define LCD_MARGIN_V      10
 
 // Résolution logique LVGL: on garde le plein 480x480 pour aligner
@@ -36,7 +36,7 @@
 // Safe area éventuelle pour le layout applicatif.
 #define LCD_SAFE_X       LCD_MARGIN_H
 #define LCD_SAFE_Y       LCD_MARGIN_V
-#define LCD_SAFE_WIDTH   (LCD_WIDTH_PHYS  - 2 * LCD_MARGIN_H)   // 440
+#define LCD_SAFE_WIDTH   (LCD_WIDTH_PHYS  - 2 * LCD_MARGIN_H)   // 450
 #define LCD_SAFE_HEIGHT  (LCD_HEIGHT_PHYS - 2 * LCD_MARGIN_V)   // 460
 
 // Rotation CO5300/MADCTL. Le driver ne fait pas de vraie rotation 90 degres,

@@ -9,6 +9,7 @@
 #include "status_bar.h"
 #include "../hal/pmu.h"
 #include "../hal/touch.h"
+#include "../../include/pins.h"
 #include <lvgl.h>
 #include <Arduino.h>
 #include <time.h>
@@ -39,8 +40,8 @@ void ui_status_bar_init() {
     }
 
     _bar = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(_bar, LV_HOR_RES, STATUS_BAR_H);
-    lv_obj_set_pos(_bar, 0, 0);
+    lv_obj_set_size(_bar, LCD_SAFE_WIDTH, STATUS_BAR_H);
+    lv_obj_set_pos(_bar, LCD_SAFE_X, LCD_SAFE_Y);
     lv_obj_set_style_bg_color(_bar, lv_color_hex(0x0D0D1A), 0);
     lv_obj_set_style_bg_opa(_bar, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(_bar, 1, 0);
@@ -111,7 +112,8 @@ void ui_status_bar_touch_tick() {
     if (!_bar) return;
 
     if (frame.just_pressed && frame.point_count > 0 && frame.points[0].valid) {
-        _touch_track = (frame.points[0].y < STATUS_BAR_H);
+        _touch_track = (frame.points[0].y >= LCD_SAFE_Y &&
+                        frame.points[0].y < (LCD_SAFE_Y + STATUS_BAR_H));
         _touch_swipe = false;
         _touch_start_x = frame.points[0].x;
         _touch_start_y = frame.points[0].y;

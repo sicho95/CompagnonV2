@@ -70,17 +70,16 @@ void AppRappels::init() {
     lv_obj_set_style_bg_color(_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(_screen, LV_OBJ_FLAG_SCROLLABLE);
-    ui_app_header_attach(_screen);
 
     lv_obj_t* title = lv_label_create(_screen);
     lv_label_set_text(title, LV_SYMBOL_BELL "  Rappels");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0xFFD54F), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 16, ui_app_header_bar_y() + 8);
+    lv_obj_set_pos(title, ui_app_content_x() + 8, ui_app_header_bar_y() + 8);
 
     _list = lv_obj_create(_screen);
-    lv_obj_set_pos(_list, 12, ui_app_content_top() - 4);
-    lv_obj_set_size(_list, LV_HOR_RES - 24, LV_VER_RES - (ui_app_content_top() + 8));
+    lv_obj_set_pos(_list, ui_app_content_x(), ui_app_content_top() - 4);
+    lv_obj_set_size(_list, ui_app_content_width(), ui_app_content_height() - 4);
     lv_obj_set_style_bg_opa(_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(_list, 0, 0);
     lv_obj_set_style_pad_all(_list, 0, 0);
@@ -88,6 +87,7 @@ void AppRappels::init() {
     lv_obj_set_flex_flow(_list, LV_FLEX_FLOW_COLUMN);
 
     _refresh_list();
+    ui_app_header_attach(_screen);
     Serial.println("[Rappels] init");
 }
 
