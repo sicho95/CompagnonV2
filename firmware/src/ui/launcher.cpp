@@ -57,6 +57,7 @@ static lv_obj_t* _labels[PAGE_COUNT][PAGE_SIZE] = {};
 static lv_obj_t* _dots[PAGE_COUNT] = {};
 static lv_obj_t* _bg_objs[16] = {};
 static uint8_t   _bg_obj_count = 0;
+static uint8_t   _bg_style_loaded = 0xFF;
 
 struct TileEventCtx {
     int  linear = -1;
@@ -105,6 +106,7 @@ static lv_obj_t* _bg_circle(lv_obj_t* parent, int x, int y, int sz,
     lv_obj_set_style_border_opa(o, opa, 0);
     lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_move_background(o);
     return o;
 }
 
@@ -120,10 +122,12 @@ static lv_obj_t* _bg_rect(lv_obj_t* parent, int x, int y, int w, int h,
     lv_obj_set_style_border_width(o, 0, 0);
     lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_move_background(o);
     return o;
 }
 
 static void _clear_background() {
+    Serial.printf("[UI] launcher bg clear count=%u\n", _bg_obj_count);
     for (uint8_t i = 0; i < _bg_obj_count; ++i) {
         if (_bg_objs[i]) lv_obj_delete(_bg_objs[i]);
         _bg_objs[i] = nullptr;
@@ -132,6 +136,8 @@ static void _clear_background() {
 }
 
 static void _build_background(uint8_t style_id) {
+    Serial.printf("[UI] launcher bg build style=%u prev=%u\n",
+                  style_id, _bg_style_loaded);
     _clear_background();
     uint8_t style = style_id % 3;
     if (style == 0) {
@@ -154,6 +160,8 @@ static void _build_background(uint8_t style_id) {
         _bg_circle(_screen, 346, 294, 220, lv_color_hex(0x1A8CFF), LV_OPA_20, 3);
         _bg_rect(_screen, 46, 52, 388, 376, lv_color_hex(0x0A1632), LV_OPA_10, 34);
     }
+    _bg_style_loaded = style;
+    Serial.printf("[UI] launcher bg build done count=%u\n", _bg_obj_count);
 }
 
 static int _page_start_index(int page) {
@@ -548,9 +556,18 @@ void ui_launcher_show() {
     if (_screen) {
         Serial.printf("[UI] launcher show scr=%p active_before=%p\n",
                       _screen, lv_scr_act());
-        _build_background(cfg_get_u8(NVS_KEY_LAUNCHER_BG, 0));
+        uint8_t style = cfg_get_u8(NVS_KEY_LAUNCHER_BG, 0) % 3;
+        if (_bg_style_loaded != style) {
+            Serial.println("[UI] launcher show -> bg rebuild needed");
+            _build_background(style);
+        } else {
+            Serial.println("[UI] launcher show -> bg reuse");
+        }
+        Serial.println("[UI] launcher show -> load screen");
         lv_scr_load(_screen);
+        Serial.println("[UI] launcher show -> raise status");
         ui_status_bar_raise();
+        Serial.println("[UI] launcher show -> sync selection");
         _sync_selection();
         lv_obj_invalidate(lv_scr_act());
         hal::display_force_refresh();
