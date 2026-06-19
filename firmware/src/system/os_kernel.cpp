@@ -181,7 +181,6 @@ void app_close_current() {
         ui_launcher_show();
         lv_obj_invalidate(lv_screen_active());
         lv_obj_invalidate(lv_layer_top());
-        hal::display_request_refresh();
         _transition_unlock_after(180);
         Serial.printf("[KERNEL] app_close_current %d -> launcher requested\n", (int)closing_id);
     })) {

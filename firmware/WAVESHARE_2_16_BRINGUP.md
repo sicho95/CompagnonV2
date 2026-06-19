@@ -238,6 +238,7 @@ Debug de gel UI:
 - si le dernier log est `UI_REFRESH begin` sans `end`, le blocage est dans `lv_refr_now()` / flush CO5300
 - si le dernier log est `lv_timer slow` ou aucun heartbeat ensuite, le blocage est côté LVGL/timer
 - `dispatch=N` montre combien de callbacks UI ont été exécutés dans le tour courant
+- le retour launcher ne doit pas demander de `display_request_refresh()`: le log a montré un blocage dans `lv_refr_now()` après fermeture d'app
 
 Autre règle critique:
 
