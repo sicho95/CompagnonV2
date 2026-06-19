@@ -56,9 +56,21 @@ static QueueHandle_t _alarm_queue = nullptr;
 static constexpr const char* NVS_NS     = "os_cfg";
 static constexpr const char* NVS_SILENT = "silent";
 
-static bool _run_on_ui_thread(ui::UiTask fn) {
+static void _run_ui_task_async_cb(void* user_data) {
+    ui::UiTask* fn = static_cast<ui::UiTask*>(user_data);
+    if (fn) {
+        (*fn)();
+        delete fn;
+    }
+}
+
+static bool _schedule_ui_transition(ui::UiTask fn) {
     if (ui::dispatch_is_ui_thread()) {
-        fn();
+        ui::UiTask* heap_fn = new ui::UiTask(std::move(fn));
+        if (lv_async_call(_run_ui_task_async_cb, heap_fn) != LV_RESULT_OK) {
+            delete heap_fn;
+            return false;
+        }
         return true;
     }
     return ui::dispatch_post(std::move(fn));
@@ -102,7 +114,7 @@ bool app_launch(AppId id) {
         prev = _apps[(int)prev_id].instance;
     }
 
-    if (!_run_on_ui_thread([inst, prev, prev_id, id, already_init, flag]() {
+    if (!_schedule_ui_transition([inst, prev, prev_id, id, already_init, flag]() {
         if (prev && prev_id == _current_app) {
             prev->onPause();
         }
@@ -129,7 +141,7 @@ void app_close_current() {
     if (_current_app == AppId::NONE) return;
     AppId closing_id = _current_app;
     AppBase* inst = _apps[(int)_current_app].instance;
-    if (!_run_on_ui_thread([inst, closing_id]() {
+    if (!_schedule_ui_transition([inst, closing_id]() {
         if (_current_app != closing_id) return;
         Serial.printf("[KERNEL] app_close_current %d\n", (int)closing_id);
         if (inst) inst->onPause();

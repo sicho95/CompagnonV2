@@ -27,6 +27,7 @@ Architecture validée:
 - LVGL reste en rotation interne `0` pour éviter une seconde transformation automatique
 - l'indev LVGL est rattaché au display, son timer interne est mis en pause, puis lu explicitement une seule fois par boucle UI
 - `app_launch()` et `app_close_current()` passent toujours par une transition atomique sur le thread UI
+- quand `launch/close` part d'un callback LVGL, la transition est différée via `lv_async_call()`
 - QMI8658 ajoute une rotation UI dynamique, avec offset de `180°` entre son repère et le repère visuel du boîtier
 - `display_set_rotation()` invalide l'écran actif et la couche top, puis force `lv_refr_now()`
 
@@ -218,7 +219,7 @@ Cette règle évite des comportements incohérents au retour launcher / ouvertur
 Corollaire important pour ce projet:
 
 - `app_launch()` et `app_close_current()` ne doivent pas modifier l'état écran hors thread UI
-- si l'appel vient déjà du thread UI, la transition s'exécute inline
+- si l'appel vient déjà d'un callback LVGL, la transition est reportée au prochain `lv_timer_handler()` via `lv_async_call()`
 - sinon elle est postée via `ui::dispatch_post(...)`
 - `_current_app` n'est changé qu'au moment de la transition UI effective
 

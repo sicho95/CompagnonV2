@@ -73,4 +73,5 @@ Résumé à respecter dans un nouveau projet:
 - `lv_timer_handler()` passe avant les ticks gesture custom
 - timer interne indev mis en pause
 - `app_launch()` / `app_close_current()` sont sérialisés sur le thread UI
+- si l'action vient d'un callback LVGL, `launch/close` est différé via `lv_async_call()`
 - QMI8658 filtré et converti avec offset de `180°`
