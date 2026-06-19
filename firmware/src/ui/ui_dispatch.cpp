@@ -30,15 +30,18 @@ bool dispatch_post(UiTask fn) {
     return true;
 }
 
-void dispatch_flush() {
-    if (!_q) return;
+uint8_t dispatch_flush() {
+    if (!_q) return 0;
+    uint8_t count = 0;
     UiTask* fn_ptr = nullptr;
     while (xQueueReceive(_q, &fn_ptr, 0) == pdTRUE) {
+        ++count;
         if (fn_ptr) {
             (*fn_ptr)();
             delete fn_ptr;
         }
     }
+    return count;
 }
 
 bool dispatch_is_ui_thread() {

@@ -232,6 +232,13 @@ Corollaire important pour ce projet:
 Cette règle évite le cas où une app serait marquée fermée logiquement, mais resterait visuellement affichée si la queue UI échouait.
 Elle évite aussi le gel observé quand le launcher planifie sa finalisation puis qu'un refresh synchrone bloque la boucle UI avant l'exécution de cette finalisation.
 
+Debug de gel UI:
+
+- `UI_TRACE` dans `src/system/os_main.cpp` active un heartbeat `UI_LOOP`
+- si le dernier log est `UI_REFRESH begin` sans `end`, le blocage est dans `lv_refr_now()` / flush CO5300
+- si le dernier log est `lv_timer slow` ou aucun heartbeat ensuite, le blocage est côté LVGL/timer
+- `dispatch=N` montre combien de callbacks UI ont été exécutés dans le tour courant
+
 Autre règle critique:
 
 - `init()` et `onResume()` ne doivent pas faire d'HTTP bloquant, DNS, TLS, ni de lecture lente

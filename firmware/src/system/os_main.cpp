@@ -32,6 +32,8 @@
 
 namespace os {
 
+#define UI_TRACE 1
+
 static TaskHandle_t _h_ui    = nullptr;
 static TaskHandle_t _h_os    = nullptr;
 static TaskHandle_t _h_voice = nullptr;
@@ -86,13 +88,47 @@ static void task_ui_lvgl(void*) {
     Serial.println("[UI] LVGL task ready");
     uint32_t last_status_tick = 0;
     uint32_t last_imu_tick = 0;
+    uint32_t last_loop_trace = 0;
+    uint32_t loop_count = 0;
     for (;;) {
-        ui::dispatch_flush();
+        const uint32_t loop_start = millis();
+        ++loop_count;
+#if UI_TRACE
+        if (loop_start - last_loop_trace >= 1000) {
+            last_loop_trace = loop_start;
+            Serial.printf("[UI_LOOP] alive loop=%lu heap=%lu active=%p\n",
+                          (unsigned long)loop_count,
+                          (unsigned long)ESP.getFreeHeap(),
+                          lv_scr_act());
+        }
+#endif
+        const uint8_t dispatched = ui::dispatch_flush();
+#if UI_TRACE
+        if (dispatched) {
+            Serial.printf("[UI_LOOP] dispatch=%u active=%p\n", dispatched, lv_scr_act());
+        }
+#endif
         if (hal::display_consume_refresh_request()) {
+            const uint32_t refresh_start = millis();
+#if UI_TRACE
+            Serial.printf("[UI_REFRESH] begin active=%p\n", lv_scr_act());
+#endif
             hal::display_force_refresh();
+#if UI_TRACE
+            Serial.printf("[UI_REFRESH] end dt=%lu active=%p\n",
+                          (unsigned long)(millis() - refresh_start), lv_scr_act());
+#endif
         }
         lv_indev_read(touch_indev);
+        const uint32_t timer_start = millis();
         lv_timer_handler();
+        const uint32_t timer_dt = millis() - timer_start;
+#if UI_TRACE
+        if (timer_dt > 40) {
+            Serial.printf("[UI_LOOP] lv_timer slow dt=%lu active=%p\n",
+                          (unsigned long)timer_dt, lv_scr_act());
+        }
+#endif
         ui_status_bar_touch_tick();
         ui_launcher_touch_tick();
         ui::notification_tick();
@@ -114,6 +150,13 @@ static void task_ui_lvgl(void*) {
             }
         }
         ui_launcher_btn_tick();
+        const uint32_t loop_dt = millis() - loop_start;
+#if UI_TRACE
+        if (loop_dt > 80) {
+            Serial.printf("[UI_LOOP] slow total=%lu active=%p\n",
+                          (unsigned long)loop_dt, lv_scr_act());
+        }
+#endif
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }

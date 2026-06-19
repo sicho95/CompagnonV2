@@ -15,7 +15,7 @@ using UiTask = std::function<void()>;
 
 void dispatch_init();
 bool dispatch_post(UiTask fn);  // fire-and-forget, thread-safe
-void dispatch_flush();          // appelé UNIQUEMENT dans task_ui_lvgl
+uint8_t dispatch_flush();       // appelé UNIQUEMENT dans task_ui_lvgl
 bool dispatch_is_ui_thread();
 
 } // namespace ui
