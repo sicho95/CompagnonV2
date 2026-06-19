@@ -546,9 +546,14 @@ void ui_launcher_init() {
 
 void ui_launcher_show() {
     if (_screen) {
+        Serial.printf("[UI] launcher show scr=%p active_before=%p\n",
+                      _screen, lv_scr_act());
         _build_background(cfg_get_u8(NVS_KEY_LAUNCHER_BG, 0));
         lv_scr_load(_screen);
         ui_status_bar_raise();
         _sync_selection();
+        lv_obj_invalidate(lv_scr_act());
+        hal::display_force_refresh();
+        Serial.printf("[UI] launcher show done active_after=%p\n", lv_scr_act());
     }
 }
