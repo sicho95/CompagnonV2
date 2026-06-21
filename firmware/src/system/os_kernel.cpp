@@ -78,7 +78,7 @@ static bool _schedule_ui_transition(ui::UiTask fn) {
     return ui::dispatch_post(std::move(fn));
 }
 
-static bool _transition_is_locked() {
+static bool _launch_is_locked() {
     return _transition_pending ||
            (int32_t)(millis() - _transition_locked_until_ms) < 0;
 }
@@ -115,7 +115,7 @@ void apps_register_all() {
 
 bool app_launch(AppId id) {
     if (id == AppId::NONE || (int)id >= (int)AppId::COUNT) return false;
-    if (_transition_is_locked()) {
+    if (_launch_is_locked()) {
         Serial.printf("[KERNEL] app_launch %d -> ignored, transition busy\n", (int)id);
         return false;
     }
@@ -163,7 +163,7 @@ bool app_launch(AppId id) {
 
 void app_close_current() {
     if (_current_app == AppId::NONE) return;
-    if (_transition_is_locked()) {
+    if (_transition_pending) {
         Serial.println("[KERNEL] app_close_current -> ignored, transition busy");
         return;
     }
