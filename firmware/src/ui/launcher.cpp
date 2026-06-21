@@ -9,6 +9,7 @@
 //   BOOT long   -> fermer l'app courante
 // ============================================================
 #include "launcher.h"
+#include "app_header.h"
 #include "status_bar.h"
 #include "ui_dispatch.h"
 #include "../hal/display.h"
@@ -30,6 +31,7 @@
 #define HOTSPOT_W      126
 #define HOTSPOT_H      170
 #define ICON_WELL_SZ   104
+#define LAUNCHER_TOP_GAP  10
 
 struct TileDesc {
     os::AppId   id;
@@ -76,6 +78,7 @@ static bool _gesture_click_suppressed = false;
 static bool _gesture_status_origin = false;
 static int16_t _gesture_start_x = 0;
 static int16_t _gesture_start_y = 0;
+static uint32_t _touch_block_until_ms = 0;
 
 static const lv_color_t BG_TOP       = LV_COLOR_MAKE(0x00, 0x00, 0x00);
 static const lv_color_t BG_BOTTOM    = LV_COLOR_MAKE(0x00, 0x00, 0x00);
@@ -89,6 +92,10 @@ static const lv_color_t DOT_ACTIVE   = LV_COLOR_MAKE(0xE8, 0xF3, 0xFF);
 
 static void _tile_event_cb(lv_event_t* e);
 static void _launcher_show_finalize_async(void* user_data);
+
+static bool _launcher_touch_blocked() {
+    return (int32_t)(millis() - _touch_block_until_ms) < 0;
+}
 
 static void _bg_track(lv_obj_t* obj) {
     if (_bg_obj_count < (sizeof(_bg_objs) / sizeof(_bg_objs[0]))) {
@@ -383,6 +390,7 @@ static void _tile_event_cb(lv_event_t* e) {
     TileEventCtx* ctx = static_cast<TileEventCtx*>(lv_event_get_user_data(e));
     if (!ctx || ctx->linear < 0 || ctx->linear >= APP_COUNT) return;
     if (!_screen || lv_scr_act() != _screen) return;
+    if (_launcher_touch_blocked()) return;
 
     switch (lv_event_get_code(e)) {
         case LV_EVENT_PRESSED:
@@ -484,6 +492,14 @@ void ui_launcher_touch_tick() {
         return;
     }
 
+    if (_launcher_touch_blocked()) {
+        _gesture_track = false;
+        _gesture_swipe_locked = false;
+        _gesture_click_suppressed = true;
+        _gesture_status_origin = false;
+        return;
+    }
+
     if (frame.just_pressed && frame.point_count > 0 && frame.points[0].valid) {
         _gesture_track = true;
         _gesture_swipe_locked = false;
@@ -532,10 +548,11 @@ void ui_launcher_init() {
     lv_obj_clear_flag(_screen, LV_OBJ_FLAG_SCROLLABLE);
     _build_background(cfg_get_u8(NVS_KEY_LAUNCHER_BG, 0));
 
+    const int content_y = ui_app_header_bar_y() + ui_app_header_bar_h() + LAUNCHER_TOP_GAP;
     lv_obj_t* content = lv_obj_create(_screen);
-    lv_obj_set_pos(content, LCD_SAFE_X, LCD_SAFE_Y + STATUS_BAR_H + 2);
+    lv_obj_set_pos(content, LCD_SAFE_X, content_y);
     lv_obj_set_size(content, LCD_SAFE_WIDTH,
-                    LCD_SAFE_HEIGHT - STATUS_BAR_H - FOOTER_H - 2);
+                    (LCD_SAFE_Y + LCD_SAFE_HEIGHT) - content_y - FOOTER_H - 2);
     lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(content, 0, 0);
     lv_obj_set_style_pad_all(content, 0, 0);
@@ -555,6 +572,7 @@ void ui_launcher_init() {
 
 void ui_launcher_show() {
     if (_screen) {
+        _touch_block_until_ms = millis() + 250;
         Serial.printf("[UI] launcher show scr=%p active_before=%p\n",
                       _screen, lv_scr_act());
         uint8_t style = cfg_get_u8(NVS_KEY_LAUNCHER_BG, 0) % 3;

@@ -240,6 +240,12 @@ Debug de gel UI:
 - `dispatch=N` montre combien de callbacks UI ont été exécutés dans le tour courant
 - le retour launcher ne doit pas demander de `display_request_refresh()`: le log a montré un blocage dans `lv_refr_now()` après fermeture d'app
 
+Collision de zones UI:
+
+- la zone du bouton `X` des apps ne doit pas se superposer à une tuile cliquable du launcher
+- le launcher réserve donc une bande haute non interactive et décale sa grille sous cette zone
+- `ui_launcher_show()` bloque aussi les taps pendant ~250 ms pour absorber le relâchement du doigt après fermeture d'app
+
 Autre règle critique:
 
 - `init()` et `onResume()` ne doivent pas faire d'HTTP bloquant, DNS, TLS, ni de lecture lente
