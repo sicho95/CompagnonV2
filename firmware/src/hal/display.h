@@ -21,6 +21,7 @@ namespace hal {
     void                  display_set_brightness(uint8_t pct);
     void                  display_sleep();
     void                  display_wakeup();
+    void                  display_invalidate_full();
     void                  display_request_refresh();
     bool                  display_consume_refresh_request();
     void                  display_force_refresh();

@@ -179,8 +179,7 @@ void app_close_current() {
         if (inst) inst->onPause();
         _current_app = AppId::NONE;
         ui_launcher_show();
-        lv_obj_invalidate(lv_screen_active());
-        lv_obj_invalidate(lv_layer_top());
+        hal::display_invalidate_full();
         _transition_unlock_after(180);
         Serial.printf("[KERNEL] app_close_current %d -> launcher requested\n", (int)closing_id);
     })) {

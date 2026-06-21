@@ -195,6 +195,12 @@ void display_wakeup() {
     Serial.println("[HAL] display_wakeup");
 }
 
+void display_invalidate_full() {
+    lv_area_t full = { 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1 };
+    if (lv_screen_active()) lv_obj_invalidate_area(lv_screen_active(), &full);
+    if (lv_layer_top()) lv_obj_invalidate_area(lv_layer_top(), &full);
+}
+
 void display_request_refresh() {
     _refresh_requested = true;
 }
