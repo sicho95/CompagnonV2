@@ -240,7 +240,7 @@ Debug de gel UI:
 - si le dernier log est `lv_timer slow` ou aucun heartbeat ensuite, le blocage est côté LVGL/timer
 - `dispatch=N` montre combien de callbacks UI ont été exécutés dans le tour courant
 - le retour launcher ne doit pas demander de `display_request_refresh()`: le log a montré un blocage dans `lv_refr_now()` après fermeture d'app
-- le retour launcher utilise `display_invalidate_full()` pour forcer le prochain tick LVGL à repeindre toute la dalle sans `lv_refr_now()`
+- le retour launcher utilise `display_invalidate_full()` / `lv_inv_area()` pour forcer le prochain tick LVGL à repeindre toute la dalle sans `lv_refr_now()`
 
 Collision de zones UI:
 

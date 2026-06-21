@@ -15,6 +15,7 @@
 #include "drivers/co5300.h"
 #include "../../include/pins.h"
 #include <lvgl.h>
+#include <lvgl_private.h>
 #include <Arduino.h>
 
 // 10 lignes logiques par buffer
@@ -196,9 +197,11 @@ void display_wakeup() {
 }
 
 void display_invalidate_full() {
+    if (!_disp) return;
     lv_area_t full = { 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1 };
-    if (lv_screen_active()) lv_obj_invalidate_area(lv_screen_active(), &full);
-    if (lv_layer_top()) lv_obj_invalidate_area(lv_layer_top(), &full);
+    lv_inv_area(_disp, &full);
+    lv_timer_t* refr_timer = lv_display_get_refr_timer(_disp);
+    if (refr_timer) lv_timer_ready(refr_timer);
 }
 
 void display_request_refresh() {
