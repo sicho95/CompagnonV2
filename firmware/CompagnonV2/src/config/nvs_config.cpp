@@ -47,8 +47,9 @@ void nvs_list_api_keys_json(char* buf, size_t len) {
         NVS_KEY_GROQ, NVS_KEY_GEMINI, NVS_KEY_SERPER,
         NVS_KEY_OPENROUTER, NVS_KEY_TWELVEDATA, NVS_KEY_METEO,
         NVS_KEY_SPOTIFY_ID, NVS_KEY_SPOTIFY_SEC,
-        NVS_KEY_TUYA_ID, NVS_KEY_TUYA_SEC,
-        NVS_KEY_ECOVACS_U, NVS_KEY_ECOVACS_P, nullptr
+        NVS_KEY_TUYA_ID, NVS_KEY_TUYA_SEC, NVS_KEY_TUYA_REGION, NVS_KEY_TUYA_USER,
+        NVS_KEY_ECOVACS_U, NVS_KEY_ECOVACS_P, NVS_KEY_ECOVACS_CC, NVS_KEY_ECOVACS_DEV,
+        nullptr
     };
     if (!_prefs) { snprintf(buf, len, "{}"); return; }
     size_t pos = 0;

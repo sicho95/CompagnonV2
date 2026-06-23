@@ -17,6 +17,8 @@
 #include "../apps/app_bourse.h"
 #include "../apps/app_meteo.h"
 #include "../apps/app_rappels.h"
+#include "../apps/smarthome/smarthome_app.h"
+#include "../apps/ecovacs/ecovacs_app.h"
 #include "../storage/reminder_store.h"
 #include "../storage/nvs_store.h"
 #include "../system/scheduler.h"
@@ -41,6 +43,8 @@ static AppRadars  _app_radars;
 static AppBourse  _app_bourse;
 static AppMeteo   _app_meteo;
 static AppRappels _app_rappels;
+static AppSmarthome _app_smarthome;
+static AppEcovacs _app_ecovacs;
 
 static AppDesc   _apps[(int)AppId::COUNT];
 static AppId     _current_app = AppId::NONE;
@@ -110,7 +114,9 @@ void apps_register_all() {
     _apps[(int)AppId::METEO]   = { AppId::METEO,   "\U0001F324", &_app_meteo,   nullptr };
     _apps[(int)AppId::RAPPELS] = { AppId::RAPPELS, "\u23F0",     &_app_rappels,
         [](const char* i, const char* p){ _app_rappels.handleIntent(i, p); } };
-    Serial.println("[KERNEL] 5 apps registered");
+    _apps[(int)AppId::DOMOTIQUE] = { AppId::DOMOTIQUE, "\U0001F3E0", &_app_smarthome, nullptr };
+    _apps[(int)AppId::ECOVACS]   = { AppId::ECOVACS,   "\U0001F9F9", &_app_ecovacs,   nullptr };
+    Serial.println("[KERNEL] 7 apps registered");
 }
 
 bool app_launch(AppId id) {

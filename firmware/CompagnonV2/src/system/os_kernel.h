@@ -21,6 +21,8 @@ enum class AppId : uint8_t {
     BOURSE   = 3,
     METEO    = 4,
     RAPPELS  = 5,
+    DOMOTIQUE = 6,
+    ECOVACS  = 7,
     COUNT
 };
 

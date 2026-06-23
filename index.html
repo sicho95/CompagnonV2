@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="fr" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f9fc">
+  <title>CompagnonV2</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">C2</div>
+      <div>
+        <strong>CompagnonV2</strong>
+        <span>PWA offline</span>
+      </div>
+    </div>
+
+    <nav class="nav-section" aria-label="Applications">
+      <p>Applications</p>
+      <button data-view="nestor" class="active" type="button"><span>N</span>Nestor</button>
+      <button data-view="rappels" type="button"><span>R</span>Rappels</button>
+      <button data-view="meteo" type="button"><span>M</span>Meteo</button>
+      <button data-view="bourse" type="button"><span>B</span>Bourse</button>
+      <button data-view="radars" type="button"><span>V</span>Radars</button>
+      <button data-view="domotique" type="button"><span>D</span>Domotique</button>
+      <button data-view="ecovacs" type="button"><span>E</span>Ecovacs</button>
+    </nav>
+
+    <nav class="nav-section" aria-label="Systeme">
+      <p>Systeme</p>
+      <button data-view="settings" type="button"><span>S</span>Parametres</button>
+    </nav>
+  </aside>
+
+  <main class="workspace">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow" id="viewKicker">Application</p>
+        <h1 id="viewTitle">Nestor</h1>
+      </div>
+      <div class="top-actions">
+        <select id="themeSelect" aria-label="Theme">
+          <option value="auto">Auto</option>
+          <option value="light">Clair</option>
+          <option value="dark">Sombre</option>
+        </select>
+        <div class="ble-pill" id="bleState">BLE deconnecte</div>
+        <button id="connectBle" type="button">Connecter</button>
+      </div>
+    </header>
+
+    <section id="view" class="view"></section>
+  </main>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

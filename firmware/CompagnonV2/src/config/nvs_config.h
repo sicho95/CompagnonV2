@@ -20,8 +20,12 @@
 #define NVS_KEY_SPOTIFY_SEC "spotify_sec"
 #define NVS_KEY_TUYA_ID     "tuya_id"
 #define NVS_KEY_TUYA_SEC    "tuya_sec"
+#define NVS_KEY_TUYA_REGION "tuya_region"
+#define NVS_KEY_TUYA_USER   "tuya_user"
 #define NVS_KEY_ECOVACS_U   "ecovacs_u"
 #define NVS_KEY_ECOVACS_P   "ecovacs_p"
+#define NVS_KEY_ECOVACS_CC  "ecovacs_cc"
+#define NVS_KEY_ECOVACS_DEV "ecovacs_dev"
 
 // ── Paramètres OS ──────────────────────────────────────────────────────────────────
 #define NVS_KEY_BLE_NAME    "ble_name"

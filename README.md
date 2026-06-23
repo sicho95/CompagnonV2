@@ -1,45 +1,40 @@
-# CompagnonV2 — Compagnon OS unifié
+# CompagnonV2
 
-Ce repo fusionne **Compagnon** (PWA + firmware ESP32-S3) et **Compagnon2** (voice OS + agents mimiclaw) en un **OS Compagnon** consolidé et exhaustif.
+PWA locale/offline a la racine du repo pour utiliser et synchroniser CompagnonV2.
 
-## Ce que c'est
+Le firmware Arduino est dans `firmware/CompagnonV2/`.
 
-- **Compagnon** = le projet. L'OS s'appelle Compagnon OS, la PWA s'appelle Compagnon PWA.
-- **Nestor** = une APP parmi les 8 apps du projet, pas l'OS ni la PWA.
-- Les 8 apps existent à la fois sur le device ESP32 et dans la PWA.
+## Usage local
 
-## Les 8 apps
-
-| # | App | PWA | Firmware |
-|---|-----|-----|----------|
-| 1 | Bourse | ✅ | ✅ |
-| 2 | Météo | ✅ | ✅ |
-| 3 | Nestor | ✅ | ✅ |
-| 4 | Musique | ✅ | ✅ |
-| 5 | Radars | ✅ | ✅ |
-| 6 | SmartHome | ✅ | ✅ |
-| 7 | Ecovacs | ✅ | ✅ |
-| 8 | Rappels | ✅ (à créer) | ✅ (à créer) |
-
-## Architecture
-
-```
-CompagnonV2/
-├── README.md
-├── SPEC.md            # spécification fonctionnelle complète
-├── ARCHITECTURE.md    # découpage modules, FreeRTOS, dual-core, BLE, sync
-├── pwa/               # Compagnon PWA (responsive, standalone, config ESP32)
-└── firmware/          # Compagnon OS (ESP32-S3, FreeRTOS, LVGL, voice, agents)
+```bash
+python3 -m http.server 8765
 ```
 
-## Points clés
+Puis ouvrir `http://localhost:8765/`.
 
-- **Standalone de chaque côté** : PWA tourne seule (sans ESP32), firmware tourne seul (sans téléphone).
-- **Sync bidirectionnelle** : agents, rappels, mémoire, configs se synchronisent dans les deux sens via BLE.
-- **WiFi provisioning** : toujours via la PWA (scan + saisie mdp + envoi BLE → NVS ESP32).
-- **Voice** : wake word (ESP-SR), STT/TTS Groq, bouton micro LVGL, mode silencieux global.
-- **Agent brain** : mimiclaw (Compagnon2) fusionné avec orchestrateur PWA actuel — meilleur des deux.
-- **SD card optionnelle** : cold storage si présente, mode dégradé si absente (sans blocage).
-- **PWA responsive** : cible iPhone 13, adaptée tablette/Android.
+Web Bluetooth demande un navigateur compatible, typiquement Chrome ou Edge. Le service worker rend l'interface disponible hors ligne apres le premier chargement.
 
-Voir `SPEC.md` pour la spécification complète et `ARCHITECTURE.md` pour l'architecture détaillée.
+## Service BLE
+
+Service principal: `12345678-1234-1234-1234-1234567890ab`
+
+| Caracteristique | UUID | Sens |
+| --- | --- | --- |
+| `WIFI_SCAN` | `00002002-0000-1000-8000-00805f9b34fb` | PWA ecrit `{cmd:"scan"}`, ESP32 notifie une liste JSON |
+| `WIFI_PROVISION` | `00002003-0000-1000-8000-00805f9b34fb` | PWA ecrit `{ssid, pass}` |
+| `AGENT_SYNC` | `00002004-0000-1000-8000-00805f9b34fb` | Commandes JSON NVS/config |
+| `TEXT_INPUT` | `00002005-0000-1000-8000-00805f9b34fb` | Texte libre vers l'orchestrateur |
+| `LLM_RELAY` | `00002006-0000-1000-8000-00805f9b34fb` | Relais LLM/internet applicatif |
+| `DEVICE_STATUS` | `00002007-0000-1000-8000-00805f9b34fb` | Statut JSON notifie par l'ESP32 |
+| `GPS` | `00002008-0000-1000-8000-00805f9b34fb` | PWA ecrit `{lat, lon, alt, speed, accuracy, ts}` |
+
+## Commandes `AGENT_SYNC`
+
+```json
+{ "cmd": "set_api_key", "key": "groq_key", "value": "..." }
+{ "cmd": "set_config", "ns": "system", "key": "timezone", "value": "CET-1CEST,M3.5.0,M10.5.0/3" }
+{ "cmd": "list_api_keys" }
+{ "cmd": "status" }
+```
+
+Les cles API autorisees sont celles de `firmware/CompagnonV2/src/config/nvs_config.h`.

@@ -45,6 +45,8 @@ static constexpr TileDesc APPS[] = {
     { os::AppId::BOURSE,  LV_SYMBOL_BARS,     "Bourse"   },
     { os::AppId::RADARS,  LV_SYMBOL_WIFI,     "Radars"   },
     { os::AppId::RAPPELS, LV_SYMBOL_BELL,     "Rappels"  },
+    { os::AppId::DOMOTIQUE, LV_SYMBOL_HOME,   "Maison"   },
+    { os::AppId::ECOVACS, LV_SYMBOL_REFRESH,  "Ecovacs"  },
     { os::AppId::NONE,    LV_SYMBOL_SETTINGS, "Reglages" },
 };
 
