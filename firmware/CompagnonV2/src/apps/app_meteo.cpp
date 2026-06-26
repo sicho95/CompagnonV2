@@ -34,6 +34,7 @@ static lv_obj_t* _day_lbl[FORECAST_DAYS]  = {};
 static lv_obj_t* _tmin_lbl[FORECAST_DAYS] = {};
 static lv_obj_t* _tmax_lbl[FORECAST_DAYS] = {};
 static uint32_t  _fetch_gen   = 0;
+static bool      _fetch_in_flight = false;
 
 static const char* _weather_label(int code);
 
@@ -55,6 +56,7 @@ struct MeteoFetchResult {
 static void _apply_fetch_result(MeteoFetchResult* result) {
     if (!result) return;
     std::unique_ptr<MeteoFetchResult> holder(result);
+    _fetch_in_flight = false;
     if (holder->gen != _fetch_gen) return;
     if (!_temp_big || !_desc_lbl) return;
 
@@ -282,14 +284,22 @@ void AppMeteo::onResume() {
 }
 
 void AppMeteo::update() {}
-void AppMeteo::onPause() {}
+void AppMeteo::onPause() {
+    ++_fetch_gen;
+}
 
 void AppMeteo::_fetch() {
+    if (_fetch_in_flight) {
+        Serial.println("[Meteo] fetch ignored, already in flight");
+        return;
+    }
     ++_fetch_gen;
+    _fetch_in_flight = true;
     auto* ctx = new MeteoFetchCtx{_fetch_gen};
     BaseType_t ok = xTaskCreatePinnedToCore(_meteo_fetch_task, "meteo_fetch",
                                             8192, ctx, 1, nullptr, 0);
     if (ok != pdPASS) {
+        _fetch_in_flight = false;
         delete ctx;
         if (_desc_lbl) lv_label_set_text(_desc_lbl, "Erreur tâche");
         Serial.println("[Meteo] fetch task create FAILED");

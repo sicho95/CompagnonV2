@@ -113,9 +113,9 @@ static void task_ui_lvgl(void*) {
 #if UI_TRACE
             Serial.printf("[UI_REFRESH] begin active=%p\n", lv_scr_act());
 #endif
-            hal::display_force_refresh();
+            hal::display_invalidate_full();
 #if UI_TRACE
-            Serial.printf("[UI_REFRESH] end dt=%lu active=%p\n",
+            Serial.printf("[UI_REFRESH] queued dt=%lu active=%p\n",
                           (unsigned long)(millis() - refresh_start), lv_scr_act());
 #endif
         }

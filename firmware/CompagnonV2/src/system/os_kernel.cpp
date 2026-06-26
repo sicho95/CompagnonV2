@@ -169,7 +169,7 @@ bool app_launch(AppId id) {
 
 void app_close_current() {
     if (_current_app == AppId::NONE) return;
-    if (_transition_pending) {
+    if (_launch_is_locked()) {
         Serial.println("[KERNEL] app_close_current -> ignored, transition busy");
         return;
     }
